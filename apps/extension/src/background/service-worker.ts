@@ -76,7 +76,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     chrome.notifications.create({
       type: "basic",
       iconUrl: "icons/icon128.png",
-      title: "BidAutomation",
+      title: "Helm",
       message: `${message.count} new project(s) synced`,
     });
   }

@@ -105,15 +105,16 @@ function toast(message, type = "success") {
     setTimeout(() => t.remove(), 3200);
 }
 const DASHBOARD_CONNECT_URL = "http://localhost:3000/connect-extension";
+const HELM_ICON_URL = chrome.runtime.getURL("icons/icon48.png");
 function buildPanel() {
     const root = el("div", "ba-panel");
     root.innerHTML = `
     <header class="ba-panel__header">
       <div class="ba-panel__brand">
-        <span class="ba-panel__logo">B</span>
+        <span class="ba-panel__logo"><img src="${HELM_ICON_URL}" alt="" width="36" height="36" /></span>
         <div>
-          <div class="ba-panel__title">BidAutomation</div>
-          <div class="ba-panel__subtitle">Rules from dashboard</div>
+          <div class="ba-panel__title">Helm</div>
+          <div class="ba-panel__subtitle">Freelancer workspace</div>
         </div>
       </div>
       <button class="ba-panel__close" type="button" aria-label="Close">×</button>
@@ -747,8 +748,15 @@ function makeDraggable(panel) {
 function injectFab() {
     if (!isProjectDetailPage())
         return;
-    const fab = el("button", "ba-fab", "Bid");
+    const fab = el("button", "ba-fab");
     fab.type = "button";
+    fab.setAttribute("aria-label", "Open Helm");
+    const icon = document.createElement("img");
+    icon.src = HELM_ICON_URL;
+    icon.alt = "";
+    icon.width = 52;
+    icon.height = 52;
+    fab.appendChild(icon);
     fab.addEventListener("click", async () => {
         await initPanel();
         panelRoot?.classList.remove("ba-panel--collapsed");

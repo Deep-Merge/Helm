@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "BidAutomation",
+  "name": "Helm",
   "version": "0.1.0",
-  "description": "Premium Freelancer bidding assistant — generate, fill, and track proposals.",
+  "description": "Freelancer workspace — discover projects, draft proposals, and track pipeline.",
   "permissions": ["storage", "notifications", "alarms"],
   "host_permissions": [
     "https://www.freelancer.com/*",
@@ -17,7 +17,7 @@
   },
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "BidAutomation",
+    "default_title": "Helm",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -29,6 +29,15 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*.png"],
+      "matches": [
+        "https://www.freelancer.com/*",
+        "https://freelancer.com/*"
+      ]
+    }
+  ],
   "content_scripts": [
     {
       "matches": [

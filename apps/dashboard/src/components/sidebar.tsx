@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useDiscoverMonitor } from "@/components/discover-monitor";
@@ -28,12 +29,17 @@ export function Sidebar() {
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-56 flex-col border-r border-[var(--border)] bg-[#0c0c0f]">
       <div className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-sm font-bold text-white">
-          B
-        </div>
+        <Image
+          src="/icon.png"
+          alt="Helm"
+          width={36}
+          height={36}
+          className="h-9 w-9 rounded-[10px] object-cover ring-1 ring-white/10"
+          priority
+        />
         <div>
-          <div className="text-sm font-semibold tracking-tight">BidAutomation</div>
-          <div className="text-xs text-[var(--muted)]">Bid workspace</div>
+          <div className="text-sm font-semibold tracking-tight">Helm</div>
+          <div className="text-xs text-[var(--muted)]">Freelancer workspace</div>
         </div>
       </div>
 

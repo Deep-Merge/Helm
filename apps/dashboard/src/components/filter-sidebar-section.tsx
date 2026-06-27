@@ -42,12 +42,18 @@ export function FilterSidebarSection({
           aria-expanded={open}
         >
           <svg
-            viewBox="0 0 20 20"
-            className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
-            fill="currentColor"
+            viewBox="0 0 12 12"
+            className={`h-3 w-3 shrink-0 text-zinc-500 transition-transform duration-200 ease-out ${open ? "rotate-90" : ""}`}
+            fill="none"
             aria-hidden
           >
-            <path d="M7.5 5.5 12 10l-4.5 4.5" />
+            <path
+              d="M4.5 2.5 8 6l-3.5 3.5"
+              stroke="currentColor"
+              strokeWidth="1.25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
           <h3 className="truncate text-sm font-semibold text-zinc-100">{title}</h3>
         </button>

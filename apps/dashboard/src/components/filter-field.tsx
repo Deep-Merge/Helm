@@ -152,17 +152,17 @@ export function FilterSelect({
       >
         <span className="truncate">{selected?.label ?? "Select…"}</span>
         <svg
-          viewBox="0 0 16 16"
+          viewBox="0 0 12 12"
           fill="none"
           aria-hidden
-          className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-200 ${
-            open ? "rotate-180 text-indigo-300" : ""
+          className={`h-3 w-3 shrink-0 text-zinc-500 transition-transform duration-200 ease-out ${
+            open ? "-rotate-180 text-zinc-300" : ""
           }`}
         >
           <path
-            d="M4 6l4 4 4-4"
+            d="M2.5 4.25 6 7.75l3.5-3.5"
             stroke="currentColor"
-            strokeWidth="1.5"
+            strokeWidth="1.25"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -265,28 +265,27 @@ export function FilterNumberInput({
         onBlur={(e) => onCommit?.(e.target.value)}
         className={`${fieldBase} ${numberInputClass} pr-9 pl-3`}
       />
-      <div className="absolute right-1 top-1/2 flex -translate-y-1/2 flex-col overflow-hidden rounded-md border border-white/10 bg-[#16161c]">
+      <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 flex-col gap-px">
         <button
           type="button"
           tabIndex={-1}
           aria-label="Increase"
           onClick={() => adjust(1)}
-          className="flex h-3.5 w-5 items-center justify-center text-zinc-500 transition hover:bg-white/[0.08] hover:text-zinc-200"
+          className="flex h-3.5 w-4 items-center justify-center rounded-[4px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
         >
-          <svg viewBox="0 0 8 8" className="h-2 w-2" fill="none" aria-hidden>
-            <path d="M1 5.5 4 2.5 7 5.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+          <svg viewBox="0 0 10 10" className="h-2.5 w-2.5" fill="none" aria-hidden>
+            <path d="M2 6.5 5 3.5 8 6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        <div className="h-px bg-white/10" />
         <button
           type="button"
           tabIndex={-1}
           aria-label="Decrease"
           onClick={() => adjust(-1)}
-          className="flex h-3.5 w-5 items-center justify-center text-zinc-500 transition hover:bg-white/[0.08] hover:text-zinc-200"
+          className="flex h-3.5 w-4 items-center justify-center rounded-[4px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200"
         >
-          <svg viewBox="0 0 8 8" className="h-2 w-2" fill="none" aria-hidden>
-            <path d="M1 2.5 4 5.5 7 2.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+          <svg viewBox="0 0 10 10" className="h-2.5 w-2.5" fill="none" aria-hidden>
+            <path d="M2 3.5 5 6.5 8 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
       </div>

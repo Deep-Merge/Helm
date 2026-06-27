@@ -1,6 +1,6 @@
-# BidAutomation
+# Helm
 
-Premium Freelancer bidding assistant — Chrome extension + API + dashboard.
+Freelancer workspace — Chrome extension + API + dashboard.
 
 ## What's included
 

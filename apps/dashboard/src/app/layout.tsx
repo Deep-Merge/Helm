@@ -13,8 +13,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BidAutomation — Dashboard",
-  description: "Premium Freelancer bidding workspace",
+  title: "Helm — Dashboard",
+  description: "Freelancer workspace — discover projects, draft proposals, track pipeline",
+  icons: {
+    icon: "/icon-letter.png",
+    apple: "/icon-letter.png",
+  },
 };
 
 export default function RootLayout({

@@ -85,7 +85,7 @@ export default function ConnectExtensionClient() {
         <div className="mt-5 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">
           <p className="font-medium text-amber-200">Optional: enable one-click connect</p>
           <ol className="mt-2 list-decimal space-y-1 pl-4 text-amber-100/80">
-            <li>Chrome → <code className="text-amber-100">chrome://extensions</code> → copy BidAutomation ID</li>
+            <li>Chrome → <code className="text-amber-100">chrome://extensions</code> → copy Helm extension ID</li>
             <li>
               Add to <code className="text-amber-100">apps/dashboard/.env.local</code>:{" "}
               <code className="text-amber-100">NEXT_PUBLIC_EXTENSION_ID=your_id</code>

@@ -6,9 +6,13 @@ export function LoginForm({ error }: { error?: string }) {
       className="glass w-full max-w-md rounded-2xl p-8"
     >
       <div className="mb-6 flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 font-bold text-white">
-          B
-        </div>
+        <img
+          src="/icon.png"
+          alt="Helm"
+          width={44}
+          height={44}
+          className="h-11 w-11 rounded-[10px] object-cover ring-1 ring-white/10"
+        />
         <div>
           <h1 className="text-lg font-semibold">Welcome back</h1>
           <p className="text-xs text-zinc-500">Sign in to your account</p>
