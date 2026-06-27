@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BidAutomation</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup">
+    <header class="popup__header">
+      <span class="popup__logo">B</span>
+      <div>
+        <h1>BidAutomation</h1>
+        <p id="connection-status">Checking connection…</p>
+      </div>
+    </header>
+
+    <div class="popup__stats" id="stats">
+      <div class="stat"><span id="stat-discovered">—</span><label>Discovered</label></div>
+      <div class="stat"><span id="stat-submitted">—</span><label>Submitted</label></div>
+      <div class="stat"><span id="stat-rate">—</span><label>Submit rate</label></div>
+    </div>
+
+    <label class="popup__label">API URL</label>
+    <input class="popup__input" id="api-url" type="url" />
+
+    <label class="popup__label">Auth token</label>
+    <input class="popup__input" id="auth-token" type="password" autocomplete="off" placeholder="Connect from dashboard" />
+
+    <p class="popup__hint">
+      Log in on the dashboard, open
+      <a id="connect-link" href="http://localhost:3000/connect-extension" target="_blank">Connect extension</a>,
+      then click Connect. Paste the token here only if auto-connect fails.
+    </p>
+
+    <label class="popup__label toggle">
+      <input type="checkbox" id="watcher" />
+      Project watcher
+    </label>
+
+    <section class="popup__hotkeys">
+      <h2 class="popup__section-title">Hotkeys</h2>
+      <p class="popup__hint popup__hint--tight">
+        On Freelancer project pages. Use Alt+Shift+letter — avoid Ctrl+Shift (Chrome uses those).
+      </p>
+
+      <input
+        type="text"
+        id="hotkey-capture"
+        class="hotkey-capture"
+        readonly
+        aria-label="Hotkey capture"
+        placeholder="Click a shortcut below, then press keys here"
+      />
+
+      <div id="hotkey-recording" class="hotkey-recording hotkey-recording--hidden">
+        Recording <strong id="hotkey-recording-label"></strong> — press keys, Esc to cancel
+      </div>
+
+      <p id="hotkey-status" class="popup__hotkey-status" aria-live="polite"></p>
+
+      <div class="hotkey-row">
+        <span class="hotkey-row__label">Copy proposal</span>
+        <button type="button" class="hotkey-row__value" data-hotkey-action="copyProposal">—</button>
+      </div>
+      <div class="hotkey-row">
+        <span class="hotkey-row__label">Copy questions</span>
+        <button type="button" class="hotkey-row__value" data-hotkey-action="copyQuestions">—</button>
+      </div>
+      <div class="hotkey-row">
+        <span class="hotkey-row__label">Fill form</span>
+        <button type="button" class="hotkey-row__value" data-hotkey-action="fillForm">—</button>
+      </div>
+
+      <button type="button" class="popup__link-btn" id="hotkey-reset">Reset hotkeys to default</button>
+    </section>
+
+    <div class="popup__actions">
+      <button class="popup__btn popup__btn--primary" id="save" type="button">Save</button>
+      <a class="popup__btn popup__btn--ghost" id="dashboard" href="http://localhost:3000" target="_blank">Open dashboard</a>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "bid-automation",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:dashboard": "npm run dev -w @bidautomation/dashboard",
+    "dev:extension": "npm run dev -w @bidautomation/extension",
+    "build:dashboard": "npm run build -w @bidautomation/dashboard",
+    "build:extension": "npm run build -w @bidautomation/extension",
+    "dev:api": "cd apps/api && py -m uvicorn main:app --reload --port 8000"
+  }
+}

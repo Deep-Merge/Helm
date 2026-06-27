@@ -1,0 +1,15 @@
+{
+  "name": "@bidautomation/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && node scripts/build-extension.mjs",
+    "dev": "tsc && node scripts/build-extension.mjs --watch"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  }
+}

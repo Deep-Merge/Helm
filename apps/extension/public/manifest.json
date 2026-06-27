@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "name": "BidAutomation",
+  "version": "0.1.0",
+  "description": "Premium Freelancer bidding assistant — generate, fill, and track proposals.",
+  "permissions": ["storage", "notifications", "alarms"],
+  "host_permissions": [
+    "https://www.freelancer.com/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "externally_connectable": {
+    "matches": ["http://localhost:3000/*", "https://*.vercel.app/*"]
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "BidAutomation",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.freelancer.com/projects",
+        "https://www.freelancer.com/projects/*",
+        "https://www.freelancer.com/projects/*/*",
+        "https://www.freelancer.com/projects/*/*/*",
+        "https://www.freelancer.com/projects/*/*/*/*",
+        "https://freelancer.com/projects",
+        "https://freelancer.com/projects/*",
+        "https://freelancer.com/projects/*/*",
+        "https://freelancer.com/projects/*/*/*",
+        "https://freelancer.com/projects/*/*/*/*"
+      ],
+      "js": ["content/project.js"],
+      "css": ["content/panel.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.freelancer.com/search/projects*",
+        "https://www.freelancer.com/jobs/*"
+      ],
+      "js": ["content/listing.js"],
+      "css": ["content/listing.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
