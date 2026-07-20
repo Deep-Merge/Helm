@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_service_key: str = ""
     supabase_jwt_secret: str = ""
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3001"
     dev_mode: bool = True
     local_persistence: bool = True
     local_data_path: str = "data/store.json"

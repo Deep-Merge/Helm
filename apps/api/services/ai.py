@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from typing import Any
@@ -13,11 +14,22 @@ from config import settings
 from prompts import DEFAULT_PROFILE, SYSTEM_PROMPT
 
 STANDARD_MODEL = "gpt-4o-mini"
-PREMIUM_MODEL = "gpt-4o"
+PREMIUM_MODEL = "gpt-4.1"
 
-# US senior software engineer effective daily rates for bid estimates (AI-assisted delivery).
-US_SENIOR_MIN_DAILY_USD = 400
-US_SENIOR_TARGET_DAILY_USD = 550
+# Models the user can pick on the settings screen. Kept as an allowlist so an
+# arbitrary/invalid model name can never reach the OpenAI API.
+SELECTABLE_MODELS = (
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-5",
+)
+
+
+def _is_reasoning_model(model: str) -> bool:
+    """gpt-5 and o-series models reject non-default temperature."""
+    return model.startswith(("gpt-5", "o1", "o3", "o4"))
 
 
 class AIServiceError(Exception):
@@ -47,7 +59,7 @@ def _translate_openai_error(exc: Exception) -> AIServiceError:
     return AIServiceError(f"OpenAI request failed: {exc}", 502)
 
 
-def _normalize_questions_from_payload(data: dict[str, Any]) -> list[str]:
+def _normalize_questions_from_payload(data: dict[str, Any], limit: int = 3) -> list[str]:
     for key in ("questions", "strategic_questions", "client_questions"):
         raw = data.get(key)
         if raw is None:
@@ -55,11 +67,11 @@ def _normalize_questions_from_payload(data: dict[str, Any]) -> list[str]:
         if isinstance(raw, str):
             lines = [line.strip().lstrip("-–•").strip() for line in raw.split("\n") if line.strip()]
             if lines:
-                return lines[:2]
+                return lines[:limit]
         if isinstance(raw, list):
             items = [str(q).strip().lstrip("-–•").strip() for q in raw if str(q).strip()]
             if items:
-                return items[:2]
+                return items[:limit]
     return []
 
 
@@ -68,6 +80,7 @@ def _fallback_questions(title: str) -> list[str]:
     return [
         f"What would a successful first delivery look like for {topic}?",
         "Are there integrations, compliance rules, or workflow constraints we should confirm before build starts?",
+        "Who are the main users, and what is the one outcome this has to get right?",
     ]
 
 
@@ -123,83 +136,79 @@ def _normalize_bid_numbers(data: dict[str, Any]) -> None:
             data["risk_score"] = None
 
 
-def _estimate_timeline_cap(title: str, description: str) -> int:
-    text = f"{title}\n{description}".lower()
-    complexity = 0
-    length = len(description or "")
-
-    if length > 2500:
-        complexity += 1
-    if length > 5000:
-        complexity += 1
-
-    heavy = (
-        "enterprise", "multi-tenant", "microservice", "machine learning",
-        "blockchain", "legacy migration", "sap ", "oracle ", "healthcare hipaa",
-        "real-time", "video stream", "marketplace", "payment gateway",
-    )
-    medium = (
-        "mobile app", "android", "ios", "react native", "flutter",
-        "dashboard", "admin panel", "crm", "saas", "api integration",
-    )
-
-    for kw in heavy:
-        if kw in text:
-            complexity += 2
-    for kw in medium:
-        if kw in text:
-            complexity += 1
-
-    if complexity >= 4:
-        return 30
-    if complexity >= 2:
-        return 21
-    return 14
+_PLEASE_RE = re.compile(r"\bplease\b", re.IGNORECASE)
 
 
-def _align_budget_and_timeline(data: dict[str, Any], title: str, description: str) -> None:
-    amount = data.get("bid_amount")
-    days = data.get("delivery_days")
-    if not isinstance(days, int):
-        return
+def _shorten_please(text: str) -> str:
+    """Replace 'Please'/'please' with 'Pls'/'pls', preserving capitalization."""
+    def repl(match: re.Match[str]) -> str:
+        return "Pls" if match.group(0)[0].isupper() else "pls"
 
-    cap = _estimate_timeline_cap(title, description)
-    if days > cap:
-        days = cap
-        data["delivery_days"] = days
-
-    if not isinstance(amount, int):
-        return
-
-    implied = amount / days if days > 0 else 0
-
-    if implied < US_SENIOR_MIN_DAILY_USD:
-        data["bid_amount"] = max(amount, int(round(days * US_SENIOR_TARGET_DAILY_USD)))
+    return _PLEASE_RE.sub(repl, text or "")
 
 
-def _finalize_bid_payload(data: dict[str, Any], title: str, description: str = "") -> dict[str, Any]:
-    proposal = (data.get("proposal") or "").strip()
-    if len(proposal) > 1200:
-        data["proposal"] = proposal[:1197].rstrip() + "..."
+def _ensure_signoff(proposal: str, display_name: str) -> str:
+    """Guarantee the proposal ends with a plain 'Thanks' sign-off (no name)."""
+    text = (proposal or "").rstrip()
+    if not text:
+        return text
+    lines = text.splitlines()
+    name = (display_name or "").strip().lower()
+    # Drop a trailing name line if the model still signed with the name.
+    if name and lines[-1].strip().lower() == name:
+        lines.pop()
+        while lines and not lines[-1].strip():
+            lines.pop()
+        text = "\n".join(lines).rstrip()
+        lines = text.splitlines()
+    # Already ends with "Thanks" (with or without a comma)? Leave it.
+    if lines and lines[-1].strip().lower().rstrip(",") == "thanks":
+        return text
+    return f"{text}\n\nThanks"
 
-    questions = _normalize_questions_from_payload(data)
-    if len(questions) < 2:
+
+def _soft_trim_proposal(proposal: str, limit: int = 2000) -> str:
+    """Trim only if extremely long, and only at a sentence/paragraph boundary."""
+    text = proposal.strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    boundary = max(cut.rfind("."), cut.rfind("!"), cut.rfind("?"), cut.rfind("\n"))
+    if boundary > 400:
+        return cut[: boundary + 1].rstrip()
+    return cut.rstrip()
+
+
+def _finalize_bid_payload(
+    data: dict[str, Any],
+    title: str,
+    description: str = "",
+    display_name: str = "",
+    question_count: int = 3,
+) -> dict[str, Any]:
+    proposal = _soft_trim_proposal(data.get("proposal") or "")
+    proposal = _shorten_please(proposal)
+    data["proposal"] = _ensure_signoff(proposal, display_name)
+
+    questions = _normalize_questions_from_payload(data, limit=question_count)
+    if len(questions) < question_count:
         for fallback in _fallback_questions(title):
-            if len(questions) >= 2:
+            if len(questions) >= question_count:
                 break
             if fallback not in questions:
                 questions.append(fallback)
-    data["questions"] = questions[:2]
+    data["questions"] = questions[:question_count]
 
     _normalize_bid_numbers(data)
-    _align_budget_and_timeline(data, title, description)
     data["feasibility"] = _normalize_feasibility(data)
     return data
 
 
-def _chat_completion(client: OpenAI, **kwargs: Any):
+async def _chat_completion(client: OpenAI, **kwargs: Any):
+    # Run the blocking OpenAI SDK call in a worker thread so it does not freeze
+    # the async event loop while a proposal generates (other requests stay live).
     try:
-        return client.chat.completions.create(**kwargs)
+        return await asyncio.to_thread(client.chat.completions.create, **kwargs)
     except Exception as exc:
         raise _translate_openai_error(exc) from exc
 
@@ -214,25 +223,27 @@ def _parse_budget(budget_text: str | None) -> float | None:
     return max(values)
 
 
-def resolve_model(tier: str, budget_text: str | None) -> str:
-    if tier == "premium":
-        return PREMIUM_MODEL
+def resolve_model(tier: str, budget_text: str | None, override_model: str | None = None) -> str:
     if tier == "standard":
         return STANDARD_MODEL
-    budget = _parse_budget(budget_text)
-    if budget is not None and budget >= 2000:
-        return PREMIUM_MODEL
-    return STANDARD_MODEL
+    # "premium" or auto: use the user's chosen model when it's a valid pick,
+    # otherwise fall back to the top model for best quality.
+    if override_model and override_model in SELECTABLE_MODELS:
+        return override_model
+    return PREMIUM_MODEL
 
 
 def _mock_response(title: str, direction: str | None) -> dict[str, Any]:
+    closing = (direction.strip() if isinstance(direction, str) else "")
+    proposal = (
+        f"Hi — I read through \"{title}\" and the scope is clear. "
+        f"I'm a senior full-stack developer (React, Next.js, Node, FastAPI) and I've shipped similar work end-to-end. "
+        f"My approach: clarify requirements, build in small milestones, and keep you updated with demos."
+    )
+    if closing:
+        proposal = f"{proposal} {closing}"
     return {
-        "proposal": (
-            f"Hi — I read through \"{title}\" and the scope is clear. "
-            f"I'm a senior full-stack developer (React, Next.js, Node, FastAPI) and I've shipped similar work end-to-end. "
-            f"My approach: clarify requirements, build in small milestones, and keep you updated with demos. "
-            f"{direction or 'Happy to discuss details in Freelancer chat.'}"
-        ),
+        "proposal": proposal,
         "bid_amount": 1200,
         "delivery_days": 14,
         "questions": [
@@ -270,7 +281,7 @@ async def analyze_project(
     client = OpenAI(api_key=settings.openai_api_key)
     user_content = f"Title: {title}\nBudget: {budget_text or 'N/A'}\nSkills: {', '.join(skills)}\n\n{description[:2000]}"
     from prompts import ANALYZE_PROMPT
-    response = _chat_completion(
+    response = await _chat_completion(
         client,
         model=STANDARD_MODEL,
         messages=[
@@ -294,13 +305,21 @@ async def generate_bid_content(
     profile: dict | None = None,
     templates: list[dict] | None = None,
 ) -> tuple[dict[str, Any], str]:
-    model = resolve_model(model_tier, budget_text)
+    p = profile or {}
+    question_count = p.get("question_count")
+    try:
+        question_count = int(question_count)
+    except (TypeError, ValueError):
+        question_count = DEFAULT_PROFILE.get("question_count", 3)
+    if question_count not in (2, 3):
+        question_count = 3
+    proposal_model = p.get("proposal_model") or DEFAULT_PROFILE.get("proposal_model")
+    model = resolve_model(model_tier, budget_text, override_model=proposal_model)
 
     if not settings.openai_api_key:
         return _mock_response(title, direction), "mock"
 
     client = OpenAI(api_key=settings.openai_api_key)
-    p = profile or {}
     profile_data = {
         "display_name": p.get("display_name") or DEFAULT_PROFILE.get("display_name", "Kareem"),
         "title": p.get("title") or DEFAULT_PROFILE["title"],
@@ -308,11 +327,18 @@ async def generate_bid_content(
         "proposal_style": p.get("proposal_style") or DEFAULT_PROFILE["proposal_style"],
     }
 
+    question_word = "two" if question_count == 2 else "three"
+    questions_example = ", ".join(
+        f'"sharp question {i}"' for i in range(1, question_count + 1)
+    )
     system = SYSTEM_PROMPT.format(
         display_name=profile_data["display_name"],
         title=profile_data["title"],
         skills=", ".join(profile_data["skills"]) if isinstance(profile_data["skills"], list) else profile_data["skills"],
         proposal_style=profile_data["proposal_style"],
+        question_count=question_count,
+        question_word=question_word,
+        questions_example=questions_example,
     )
 
     user_content = f"""Project title: {title}
@@ -324,23 +350,30 @@ Description:
 {description}
 
 User direction:
-{direction or "Make it confident and human. Ask to discuss in Freelancer chat."}
+{direction if direction is not None else "Make it confident, human, and natural. Follow the user's rules exactly. Do not force any specific CTA or platform mention unless asked."}
 """
     if templates:
         examples = "\n\n---\n".join(t.get("content", "")[:500] for t in templates[:2])
         user_content += f"\n\nWinning proposal examples:\n{examples}"
 
-    response = _chat_completion(
-        client,
-        model=model,
-        messages=[
+    completion_kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user_content},
         ],
-        response_format={"type": "json_object"},
-        temperature=0.7,
-    )
+        "response_format": {"type": "json_object"},
+    }
+    # gpt-5 / reasoning models only accept the default temperature.
+    if not _is_reasoning_model(model):
+        # Higher temperature keeps proposals warm and worded differently each time.
+        completion_kwargs["temperature"] = 0.85
+
+    response = await _chat_completion(client, **completion_kwargs)
 
     raw = response.choices[0].message.content or "{}"
     data = json.loads(raw)
-    return _finalize_bid_payload(data, title, description), model
+    return _finalize_bid_payload(
+        data, title, description, display_name=profile_data["display_name"],
+        question_count=question_count,
+    ), model

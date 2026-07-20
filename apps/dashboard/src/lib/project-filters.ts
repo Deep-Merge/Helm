@@ -1,5 +1,13 @@
 export type FindStatusFilter = "all" | "new" | "seen" | "submitted";
 
+export type FindPriceSort = "newest" | "price_asc" | "price_desc";
+
+export const FIND_PRICE_SORT_OPTIONS = [
+  { value: "newest", label: "Newest first" },
+  { value: "price_asc", label: "Price: low to high" },
+  { value: "price_desc", label: "Price: high to low" },
+] as const;
+
 export type ProjectFilterValues = {
   q: string;
   exclude_countries: string;
@@ -13,6 +21,10 @@ export type ProjectFilterValues = {
   budget_type: string;
   exclude_submitted: boolean;
   days: string;
+  date_from: string;
+  date_to: string;
+  range: string;
+  sort: FindPriceSort;
 };
 
 export type SavedFilter = {
@@ -23,16 +35,25 @@ export type SavedFilter = {
   skills?: string[];
   min_budget?: number | null;
   max_budget?: number | null;
+  min_hourly?: number | null;
+  max_hourly?: number | null;
   budget_type?: string;
   exclude_submitted?: boolean;
   days?: number | null;
 };
 
 export function parseCsvList(value: string): string[] {
-  return value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const part of value.split(",")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
 }
 
 export function toCsvList(items: string[]): string {
@@ -62,6 +83,12 @@ function parseProjectTypes(sp: Record<string, string | undefined>): {
   return { type_fixed: false, type_hourly: false };
 }
 
+export function parseFindSort(sp: Record<string, string | undefined>): FindPriceSort {
+  const value = sp.sort;
+  if (value === "price_asc" || value === "price_desc") return value;
+  return "newest";
+}
+
 export function parseFindStatus(sp: Record<string, string | undefined>): FindStatusFilter {
   const value = sp.status;
   if (value === "new" || value === "seen" || value === "submitted") return value;
@@ -84,6 +111,10 @@ export function parseFilterSearchParams(
     budget_type: deriveBudgetType(types.type_fixed, types.type_hourly),
     exclude_submitted: sp.exclude_submitted === "true",
     days: sp.days || "",
+    date_from: sp.range === "all" ? "" : sp.date_from || "",
+    date_to: sp.range === "all" ? "" : sp.date_to || "",
+    range: sp.range === "all" ? "all" : "",
+    sort: parseFindSort(sp),
   };
 }
 
@@ -114,8 +145,29 @@ export function toSearchParams(
   if (types.length === 1) params.set("types", types[0]);
   if (values.exclude_submitted) params.set("exclude_submitted", "true");
   if (values.days) params.set("days", values.days);
+  if (values.range === "all") {
+    params.set("range", "all");
+  } else {
+    if (values.date_from) params.set("date_from", values.date_from);
+    if (values.date_to) params.set("date_to", values.date_to);
+  }
+  if (values.sort && values.sort !== "newest") params.set("sort", values.sort);
   if (refresh) params.set("refresh", "1");
   return params;
+}
+
+export function findDateRange(values: ProjectFilterValues): { from: string; to: string } {
+  return { from: values.date_from, to: values.date_to };
+}
+
+export function withFindDateRange(
+  values: ProjectFilterValues,
+  range: { from: string; to: string },
+): ProjectFilterValues {
+  if (!range.from && !range.to) {
+    return { ...values, date_from: "", date_to: "", range: "all" };
+  }
+  return { ...values, date_from: range.from, date_to: range.to, range: "" };
 }
 
 export function buildDiscoverKey(_values: ProjectFilterValues): string {
@@ -135,6 +187,10 @@ export const EMPTY_FILTER_VALUES: ProjectFilterValues = {
   budget_type: "any",
   exclude_submitted: false,
   days: "",
+  date_from: "",
+  date_to: "",
+  range: "",
+  sort: "newest",
 };
 
 export function savedToValues(filter: SavedFilter): ProjectFilterValues {
@@ -145,12 +201,16 @@ export function savedToValues(filter: SavedFilter): ProjectFilterValues {
     skills: (filter.skills || []).join(", "),
     min_budget: filter.min_budget != null ? String(filter.min_budget) : "",
     max_budget: filter.max_budget != null ? String(filter.max_budget) : "",
-    min_hourly: "",
-    max_hourly: "",
+    min_hourly: filter.min_hourly != null ? String(filter.min_hourly) : "",
+    max_hourly: filter.max_hourly != null ? String(filter.max_hourly) : "",
     type_fixed: budgetType === "fixed",
     type_hourly: budgetType === "hourly",
     budget_type: budgetType,
     exclude_submitted: filter.exclude_submitted ?? false,
     days: filter.days != null ? String(filter.days) : "",
+    date_from: "",
+    date_to: "",
+    range: "",
+    sort: "newest",
   };
 }

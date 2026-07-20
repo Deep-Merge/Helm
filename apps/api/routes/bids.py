@@ -56,7 +56,7 @@ async def analyze(body: AnalyzeRequest, auth: AuthContext = Depends(get_auth)):
 @router.post("/generate")
 async def generate_bid(body: GenerateBidRequest, auth: AuthContext = Depends(get_auth)):
     profile = store.get_profile(auth.user_id, persistent=auth.persistent)
-    direction = body.direction or (profile or {}).get("default_direction")
+    direction = body.direction if body.direction is not None else (profile or {}).get("default_direction")
     templates = store.get_winning_templates(auth.user_id, persistent=auth.persistent)
 
     project = None
@@ -171,7 +171,12 @@ async def regenerate_bid(
 
     profile = store.get_profile(auth.user_id, persistent=auth.persistent)
     templates = store.get_winning_templates(auth.user_id, persistent=auth.persistent)
-    dir_text = direction or old.get("direction") or (profile or {}).get("default_direction")
+    if direction is not None:
+        dir_text = direction
+    elif (profile or {}).get("default_direction") is not None:
+        dir_text = (profile or {}).get("default_direction")
+    else:
+        dir_text = old.get("direction")
 
     content, model_used = await ai.generate_bid_content(
         title=project["title"],

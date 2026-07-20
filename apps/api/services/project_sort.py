@@ -13,8 +13,31 @@ def _posted_ts(project: dict[str, Any]) -> float:
         return 0.0
 
 
-def sort_projects_for_display(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Newest Freelancer post first (status does not reorder)."""
+def _budget_sort_key(project: dict[str, Any], *, high: bool) -> float:
+    bmin = project.get("budget_min")
+    bmax = project.get("budget_max")
+    if high:
+        val = bmax if bmax is not None else bmin
+        return float(val) if val is not None else float("-inf")
+    val = bmin if bmin is not None else bmax
+    return float(val) if val is not None else float("inf")
+
+
+def sort_projects_for_display(
+    items: list[dict[str, Any]],
+    sort: str | None = None,
+) -> list[dict[str, Any]]:
+    mode = (sort or "newest").lower()
+    if mode == "price_asc":
+        return sorted(
+            items,
+            key=lambda p: (_budget_sort_key(p, high=False), -_posted_ts(p), str(p.get("id", ""))),
+        )
+    if mode == "price_desc":
+        return sorted(
+            items,
+            key=lambda p: (-_budget_sort_key(p, high=True), -_posted_ts(p), str(p.get("id", ""))),
+        )
     return sorted(
         items,
         key=lambda p: (-_posted_ts(p), str(p.get("id", ""))),

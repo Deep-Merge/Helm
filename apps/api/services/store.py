@@ -20,12 +20,60 @@ def list_projects(user_id: str, status: str | None = None, q: str | None = None,
     )
 
 
+def count_projects_by_day(user_id: str, status: str | None = None, q: str | None = None,
+                          filters: dict[str, Any] | None = None,
+                          *, persistent: bool = False) -> dict[str, int]:
+    """Count matching projects grouped by their local calendar day.
+
+    Buckets by the same field the date filter uses (submitted_at for the
+    submitted view, else the Freelancer post time), respecting tz_offset so
+    the counts line up with how the dashboard groups the cards. Returns the
+    full per-day totals across the whole filtered set, not just one page.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    merged = dict(filters or {})
+    date_field = merged.get("date_field", "submitted")
+    tz_offset = merged.get("tz_offset")
+    tz_offset_minutes = int(tz_offset) if tz_offset is not None else 0
+
+    projects, _ = _backend(persistent).list_projects(
+        user_id, status, q, 100000, 0, merged,
+    )
+
+    counts: dict[str, int] = {}
+    for project in projects:
+        if date_field == "submitted":
+            raw = project.get("submitted_at")
+        else:
+            raw = project.get("freelancer_posted_at") or project.get("first_seen_at")
+        if not raw:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        # tz_offset_minutes matches JS getTimezoneOffset() (local + offset = UTC),
+        # so local time = UTC - offset.
+        local = dt.astimezone(timezone.utc) - timedelta(minutes=tz_offset_minutes)
+        day = local.strftime("%Y-%m-%d")
+        counts[day] = counts.get(day, 0) + 1
+    return counts
+
+
+
 def get_project(user_id: str, project_id: str, *, persistent: bool = False):
     return _backend(persistent).get_project(user_id, project_id)
 
 
 def delete_project(user_id: str, project_id: str, *, persistent: bool = False) -> bool:
     return _backend(persistent).delete_project(user_id, project_id)
+
+
+def cleanup_old_projects(user_id: str, older_than_days: int = 10, *, persistent: bool = False) -> int:
+    return _backend(persistent).cleanup_old_projects(user_id, older_than_days)
 
 
 def get_project_status_map(user_id: str, *, persistent: bool = False):
@@ -187,6 +235,7 @@ def get_analytics_report(
     granularity: str = "day",
     preset_id: str | None = None,
     *,
+    tz_offset_minutes: int = 0,
     persistent: bool = False,
 ) -> dict[str, Any]:
     from services.analytics_helpers import (
@@ -219,6 +268,7 @@ def get_analytics_report(
         days=days,
         granularity=granularity,
         preset=preset_meta,
+        tz_offset_minutes=tz_offset_minutes,
     )
 
 
@@ -234,6 +284,7 @@ def get_analytics_timeline(
     days: int = 30,
     granularity: str = "day",
     *,
+    tz_offset_minutes: int = 0,
     persistent: bool = False,
 ) -> dict[str, Any]:
     from services.analytics_helpers import compute_timeline
@@ -241,7 +292,13 @@ def get_analytics_timeline(
     backend = _backend(persistent)
     projects, _ = backend.list_projects(user_id, limit=100000)
     events = list_status_events(user_id, persistent=persistent)
-    return compute_timeline(projects, events, days=days, granularity=granularity)
+    return compute_timeline(
+        projects,
+        events,
+        days=days,
+        granularity=granularity,
+        tz_offset_minutes=tz_offset_minutes,
+    )
 
 
 def export_csv(user_id: str, *, persistent: bool = False):

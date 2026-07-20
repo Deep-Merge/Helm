@@ -1,8 +1,12 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
+import atexit
+import threading
+import time
 
 from config import settings
+from services.store_shared import prefer_project_description, prefer_project_title
 
 _projects: dict[str, dict[str, Any]] = {}
 _bids: dict[str, dict[str, Any]] = {}
@@ -35,9 +39,88 @@ def _store_state() -> dict[str, Any]:
 def _persist() -> None:
     if not settings.local_persistence:
         return
-    from services.local_persistence import save_store
+    from services.local_persistence import serialize_store
 
-    save_store(_store_state())
+    # Serialize on the calling (request) thread — this is the only thread that
+    # mutates the store, so the snapshot is consistent without locking.
+    text = serialize_store(_store_state())
+    _schedule_write(text)
+
+
+# --- Debounced background disk writer -------------------------------------
+# The disk write (atomic tmp.replace) is the slow, high-variance step —
+# especially on Windows where antivirus can stall the file replace. Keep it
+# off the request path so mutations (e.g. mark submitted) return instantly.
+_write_lock = threading.Lock()
+_pending_payload: str | None = None
+_write_signal = threading.Event()
+_writer_thread: threading.Thread | None = None
+_WRITE_DEBOUNCE_SECONDS = 0.4
+
+
+def _schedule_write(text: str) -> None:
+    global _pending_payload
+    with _write_lock:
+        _pending_payload = text
+    _ensure_writer_thread()
+    _write_signal.set()
+
+
+def _ensure_writer_thread() -> None:
+    global _writer_thread
+    if _writer_thread is not None and _writer_thread.is_alive():
+        return
+    with _write_lock:
+        if _writer_thread is not None and _writer_thread.is_alive():
+            return
+        _writer_thread = threading.Thread(
+            target=_writer_loop, name="store-writer", daemon=True
+        )
+        _writer_thread.start()
+
+
+def _writer_loop() -> None:
+    global _pending_payload
+    from services.local_persistence import write_serialized
+
+    while True:
+        _write_signal.wait()
+        # Coalesce bursts of rapid mutations into a single disk write.
+        _write_signal.clear()
+        time.sleep(_WRITE_DEBOUNCE_SECONDS)
+        with _write_lock:
+            text = _pending_payload
+            _pending_payload = None
+        if text is None:
+            continue
+        try:
+            write_serialized(text)
+        except OSError:
+            # Re-queue on failure so data isn't lost; retry shortly.
+            with _write_lock:
+                if _pending_payload is None:
+                    _pending_payload = text
+            _write_signal.set()
+            time.sleep(_WRITE_DEBOUNCE_SECONDS)
+
+
+def _flush_pending_writes() -> None:
+    """Synchronously flush any pending store payload (called at process exit)."""
+    global _pending_payload
+    from services.local_persistence import write_serialized
+
+    with _write_lock:
+        text = _pending_payload
+        _pending_payload = None
+    if text is not None:
+        try:
+            write_serialized(text)
+        except OSError:
+            pass
+
+
+atexit.register(_flush_pending_writes)
+
 
 
 def init_from_disk() -> bool:
@@ -186,7 +269,7 @@ def list_projects(
         if p["user_id"] == user_id
     ]
     items = apply_project_filters(items, merged)
-    items = sort_projects_for_display(items)
+    items = sort_projects_for_display(items, merged.get("sort"))
     total = len(items)
     page_items = items[offset : offset + limit]
     if return_unseen:
@@ -215,6 +298,62 @@ def delete_project(user_id: str, project_id: str) -> bool:
     _events = [event for event in _events if event.get("project_id") != project_id]
     _persist()
     return True
+
+
+# Statuses that mean the user acted on the project (placed/decided a bid) — never auto-deleted.
+_CLEANUP_KEEP_STATUSES = {"submitted", "won", "lost"}
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def cleanup_old_projects(user_id: str, older_than_days: int = 10) -> int:
+    """Delete the user's projects older than N days, keeping only submitted ones."""
+    global _bids, _events
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    to_delete: list[str] = []
+    for project_id, project in _projects.items():
+        if project.get("user_id") != user_id:
+            continue
+        fid = project.get("freelancer_project_id")
+        status = get_user_project_status(user_id, fid) if fid else project.get("status", "new")
+        if status in _CLEANUP_KEEP_STATUSES:
+            continue
+        # Age by the Freelancer posted time (what the UI shows as "X weeks ago"),
+        # not our save time. discovered_at is only a last-resort fallback.
+        posted = _parse_iso(
+            project.get("freelancer_posted_at")
+            or project.get("first_seen_at")
+            or project.get("discovered_at")
+        )
+        if posted is None or posted >= cutoff:
+            continue
+        to_delete.append(project_id)
+
+    if not to_delete:
+        return 0
+
+    delete_set = set(to_delete)
+    for project_id in to_delete:
+        project = _projects.pop(project_id, None)
+        if not project:
+            continue
+        fid = project.get("freelancer_project_id")
+        if fid:
+            _user_project_status.pop(_project_lookup_key(user_id, fid), None)
+    _bids = {bid_id: bid for bid_id, bid in _bids.items() if bid.get("project_id") not in delete_set}
+    _events = [event for event in _events if event.get("project_id") not in delete_set]
+    _persist()
+    return len(to_delete)
 
 
 def get_project_status_map(user_id: str) -> dict[str, str]:
@@ -286,8 +425,8 @@ def upsert_project(user_id: str, data: dict[str, Any]) -> dict[str, Any]:
     )
     if existing:
         existing.update({
-            "title": data.get("title", existing["title"]),
-            "description": _keep_nonempty_text(data.get("description"), existing["description"]),
+            "title": prefer_project_title(data.get("title"), existing.get("title")),
+            "description": prefer_project_description(data.get("description"), existing.get("description")),
             "budget_text": data.get("budget_text") or existing["budget_text"],
             "budget_type": data.get("budget_type") or existing.get("budget_type", "unknown"),
             "budget_min": data.get("budget_min") if data.get("budget_min") is not None else existing.get("budget_min"),
@@ -319,8 +458,8 @@ def upsert_project(user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         "user_id": user_id,
         "freelancer_project_id": data["freelancer_project_id"],
         "url": data["url"],
-        "title": data["title"],
-        "description": data.get("description", ""),
+        "title": prefer_project_title(data.get("title"), "Untitled"),
+        "description": prefer_project_description(data.get("description"), ""),
         "budget_text": data.get("budget_text"),
         "budget_type": data.get("budget_type", "unknown"),
         "budget_min": data.get("budget_min"),
@@ -666,8 +805,10 @@ def get_profile(user_id: str) -> dict[str, Any] | None:
         "bio": "",
         "skills": ["React", "Next.js", "Node.js", "TypeScript", "Python", "FastAPI"],
         "proposal_style": "Warm, confident, human. No generic AI tone.",
-        "default_direction": "Explain my approach simply and ask to discuss in Freelancer chat.",
+        "default_direction": "Explain my approach simply.",
         "default_model_tier": "auto",
+        "question_count": 3,
+        "proposal_model": "gpt-4.1",
     }
     _profile_cache[user_id] = default
     return default

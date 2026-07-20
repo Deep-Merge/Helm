@@ -10,15 +10,18 @@ import { CopyProjectUrlButton } from "@/components/copy-project-url-button";
 import { DeleteProjectButton } from "@/components/delete-project-button";
 import { ToggleSubmittedButton } from "@/components/toggle-submitted-button";
 import { useDiscoverMonitor } from "@/components/discover-monitor";
+import { GeneratingProjectBadge } from "@/components/proposal-generating-progress";
 import { ProjectStatusBadge } from "@/components/project-status-badge";
 import { RelativeTime } from "@/components/relative-time";
 import type { Project } from "@/lib/api";
-import { markProjectAsSeen } from "@/lib/mark-project-seen";
-import { saveFindScrollRestore } from "@/lib/find-scroll-restore";
-import { openFreelancerFromClick, isBackgroundOpenModifier } from "@/lib/open-freelancer";
+import {
+  activateFindProject,
+  buildFindProjectDetailHref,
+} from "@/lib/activate-find-project";
+import { useProposalGeneration } from "@/hooks/use-proposal-generation";
 import { pipelineStatus } from "@/lib/project-status";
+import { formatProjectBudgetLabel, formatProjectBudgetText } from "@/lib/project-budget";
 import { projectPostedAt } from "@/lib/relative-time";
-import { withReturnTo } from "@/lib/return-to";
 
 const VISIBLE_SKILLS = 5;
 const DESCRIPTION_LIMIT = 280;
@@ -34,12 +37,11 @@ function formatAvgBid(project: Project, compact: boolean): string | null {
   if (project.bid_avg == null) return null;
   const sign = project.bid_currency_sign || "$";
   const code = project.bid_currency_code || "USD";
-  const amount = Number(project.bid_avg);
-  const formatted = Number.isInteger(amount) ? amount.toLocaleString() : amount.toFixed(0);
+  const amount = Math.round(Number(project.bid_avg));
   const suffix = project.budget_type === "hourly" ? (compact ? "/hr" : " per hour") : "";
   return compact
-    ? `${sign}${formatted}${suffix}`
-    : `${sign}${formatted} ${code}${suffix}`;
+    ? `${sign}${amount.toLocaleString()}${suffix}`
+    : `${sign}${amount.toLocaleString()} ${code}${suffix}`;
 }
 
 function SkillsRow({ skills, compact }: { skills: string[]; compact: boolean }) {
@@ -83,7 +85,6 @@ export function ProjectListCards({
   returnTo?: string;
   compact?: boolean;
 }) {
-  const router = useRouter();
   const { markProjectSeen, confirmProjectSeenOnServer, removeProject, setProjectStatus } =
     useDiscoverMonitor();
 
@@ -100,73 +101,109 @@ export function ProjectListCards({
 
   return (
     <div className={compact ? "space-y-2" : "space-y-3"}>
-      {projects.map((project) => {
-        const detailHref = returnTo
-          ? withReturnTo(`/projects/${project.id}`, returnTo)
-          : `/projects/${project.id}`;
-        const avgBid = formatAvgBid(project, compact);
-        const description = truncateDescription(project.description || "", compact);
-        const isNew = pipelineStatus(project.status) === "new";
-        const isSubmitted = pipelineStatus(project.status) === "submitted";
-        const hasMore =
-          !compact &&
-          project.description &&
-          project.description.replace(/\s+/g, " ").trim().length > DESCRIPTION_LIMIT;
+      {projects.map((project) => (
+        <ProjectListCardItem
+          key={project.id}
+          project={project}
+          returnTo={returnTo}
+          compact={compact}
+          markProjectSeen={markProjectSeen}
+          confirmProjectSeenOnServer={confirmProjectSeenOnServer}
+          removeProject={removeProject}
+          setProjectStatus={setProjectStatus}
+        />
+      ))}
+    </div>
+  );
+}
 
-        function handleCardActivate(event: React.MouseEvent | React.KeyboardEvent) {
-          if (isBackgroundOpenModifier(event)) {
-            event.preventDefault();
-            openFreelancerFromClick(project, event);
-            markProjectAsSeen(project, markProjectSeen, confirmProjectSeenOnServer, {
-              skipServer: true,
-            });
-            return;
-          }
-          if (returnTo) saveFindScrollRestore(returnTo);
-          router.push(detailHref, { scroll: false });
-          markProjectAsSeen(project, markProjectSeen, confirmProjectSeenOnServer, {
-            skipServer: true,
-          });
+function ProjectListCardItem({
+  project,
+  returnTo,
+  compact,
+  markProjectSeen,
+  confirmProjectSeenOnServer,
+  removeProject,
+  setProjectStatus,
+}: {
+  project: Project;
+  returnTo?: string;
+  compact: boolean;
+  markProjectSeen: (projectId: string) => void;
+  confirmProjectSeenOnServer: (projectId: string) => void;
+  removeProject: (projectId: string) => void;
+  setProjectStatus: (projectId: string, status: "submitted" | "viewed") => void;
+}) {
+  const router = useRouter();
+  const { isGenerating } = useProposalGeneration(project.id);
+  const detailHref = buildFindProjectDetailHref(project.id, returnTo);
+  const avgBid = formatAvgBid(project, compact);
+  const description = truncateDescription(project.description || "", compact);
+  const isNew = pipelineStatus(project.status) === "new";
+  const isSubmitted = pipelineStatus(project.status) === "submitted";
+  const budgetLabel = formatProjectBudgetLabel(project);
+  const budgetText = formatProjectBudgetText(project);
+  const hasMore =
+    !compact &&
+    project.description &&
+    project.description.replace(/\s+/g, " ").trim().length > DESCRIPTION_LIMIT;
+
+  function handleCardActivate(event: React.MouseEvent | React.KeyboardEvent) {
+    activateFindProject(event, project, detailHref, returnTo, router, {
+      markProjectSeen,
+      confirmProjectSeenOnServer,
+    });
+  }
+
+  function prefetchDetail() {
+    router.prefetch(detailHref);
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onMouseEnter={prefetchDetail}
+      onFocus={prefetchDetail}
+      onClick={(event) => handleCardActivate(event)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          handleCardActivate(event);
         }
-
-        function prefetchDetail() {
-          router.prefetch(detailHref);
-        }
-
-        return (
-          <div
-            key={project.id}
-            role="button"
-            tabIndex={0}
-            onMouseEnter={prefetchDetail}
-            onFocus={prefetchDetail}
-            onClick={(event) => handleCardActivate(event)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                handleCardActivate(event);
-              }
-            }}
-            className={`group block cursor-pointer rounded-2xl outline-none transition-shadow duration-200 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b] ${
-              isNew
-                ? "ring-2 ring-indigo-400/90 ring-offset-2 ring-offset-[#09090b] hover:ring-indigo-400/70 focus-visible:ring-indigo-500/50"
-                : isSubmitted
-                  ? "ring-2 ring-emerald-400/50 ring-offset-2 ring-offset-[#09090b] hover:ring-emerald-300/65 focus-visible:ring-emerald-300/70"
-                  : "hover:ring-2 hover:ring-indigo-400/70 hover:ring-offset-2 hover:ring-offset-[#09090b] focus-visible:ring-indigo-500/50"
+      }}
+      className={`group block cursor-pointer rounded-2xl outline-none transition-shadow duration-200 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b] ${
+              isGenerating
+                ? "ring-2 ring-violet-400/70 ring-offset-2 ring-offset-[#09090b] shadow-[0_0_32px_-8px_rgba(139,92,246,0.55)]"
+                : isNew
+                  ? "ring-2 ring-indigo-400/90 ring-offset-2 ring-offset-[#09090b] hover:ring-indigo-400/70 focus-visible:ring-indigo-500/50"
+                  : isSubmitted
+                    ? "ring-2 ring-emerald-400/50 ring-offset-2 ring-offset-[#09090b] hover:ring-emerald-300/65 focus-visible:ring-emerald-300/70"
+                    : "hover:ring-2 hover:ring-indigo-400/70 hover:ring-offset-2 hover:ring-offset-[#09090b] focus-visible:ring-indigo-500/50"
             }`}
           >
             <article
               className={`relative overflow-hidden rounded-2xl transition-[border-color,box-shadow,background-color] duration-200 ${
                 compact ? "px-4 py-3" : "px-6 py-5"
               } ${
-                isNew
+                isGenerating
+                  ? "border-2 border-violet-400/50 bg-gradient-to-br from-violet-500/[0.14] via-[#0f0d18] to-indigo-500/[0.08] shadow-[0_0_0_1px_rgba(167,139,250,0.45),0_0_40px_-6px_rgba(139,92,246,0.5)]"
+                  : isNew
                   ? "border-2 border-indigo-400/80 bg-indigo-500/[0.12] shadow-[0_0_0_1px_rgba(129,140,248,0.5),0_0_32px_-6px_rgba(99,102,241,0.75)] group-hover:border-indigo-300 group-hover:shadow-[0_0_0_1px_rgba(165,180,252,0.7),0_0_48px_-4px_rgba(99,102,241,0.9)]"
                   : isSubmitted
                     ? "border-2 border-emerald-400/55 bg-gradient-to-br from-emerald-500/[0.12] via-[#0c1210] to-teal-500/[0.06] shadow-[0_0_0_1px_rgba(52,211,153,0.45),0_8px_32px_-12px_rgba(16,185,129,0.3)] group-hover:border-emerald-300/70 group-hover:shadow-[0_0_0_1px_rgba(110,231,183,0.55),0_12px_40px_-10px_rgba(16,185,129,0.38)]"
                     : "glass border border-white/[0.06] group-hover:border-indigo-300/80 group-hover:shadow-[0_0_0_1px_rgba(129,140,248,0.45),0_0_40px_-4px_rgba(99,102,241,0.65)]"
               }`}
             >
-              {isNew && (
+              {isGenerating && (
+                <div
+                  className={`absolute inset-y-0 left-0 bg-gradient-to-b from-violet-300 via-violet-400 to-indigo-500 ${
+                    compact ? "w-1" : "w-1.5"
+                  }`}
+                  aria-hidden
+                />
+              )}
+              {isNew && !isGenerating && (
                 <div
                   className={`absolute inset-y-0 left-0 bg-gradient-to-b from-indigo-300 via-indigo-400 to-indigo-500 ${
                     compact ? "w-1" : "w-1.5"
@@ -174,7 +211,7 @@ export function ProjectListCards({
                   aria-hidden
                 />
               )}
-              {isSubmitted && !isNew && (
+              {isSubmitted && !isNew && !isGenerating && (
                 <div
                   className={`absolute inset-y-0 left-0 bg-gradient-to-b from-emerald-300 via-emerald-400 to-teal-500 ${
                     compact ? "w-1" : "w-1.5"
@@ -186,8 +223,9 @@ export function ProjectListCards({
                 <div className="min-w-0 flex-1">
                   <div className={`flex flex-wrap items-center gap-2 ${compact ? "mb-1" : "mb-2"}`}>
                     <ProjectStatusBadge status={project.status} size={compact ? "sm" : "md"} />
-                    {compact && project.budget_text && (
-                      <span className="truncate text-xs text-zinc-500">{project.budget_text}</span>
+                    {isGenerating ? <GeneratingProjectBadge compact={compact} /> : null}
+                    {compact && budgetText && (
+                      <span className="truncate text-xs text-zinc-500">{budgetText}</span>
                     )}
                   </div>
                   <h3
@@ -203,10 +241,8 @@ export function ProjectListCards({
                   >
                     {project.title}
                   </h3>
-                  {!compact && project.budget_text && (
-                    <p className="mt-1.5 text-[17px] text-zinc-400">
-                      Budget {project.budget_text}
-                    </p>
+                  {!compact && budgetLabel && (
+                    <p className="mt-1.5 text-[17px] text-zinc-400">{budgetLabel}</p>
                   )}
                 </div>
 
@@ -305,9 +341,6 @@ export function ProjectListCards({
                 </div>
               </div>
             </article>
-          </div>
-        );
-      })}
     </div>
   );
 }

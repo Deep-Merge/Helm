@@ -10,6 +10,7 @@ const dist = resolve(root, "dist");
 const bundles = [
   { entry: "src/content/project.ts", outDir: "content", fileName: "project.js" },
   { entry: "src/content/listing.ts", outDir: "content", fileName: "listing.js" },
+  { entry: "src/content/bridge.ts", outDir: "content", fileName: "bridge.js" },
   { entry: "src/popup/popup.ts", outDir: "popup", fileName: "popup.js" },
   { entry: "src/background/service-worker.ts", outDir: "background", fileName: "service-worker.js" },
 ];

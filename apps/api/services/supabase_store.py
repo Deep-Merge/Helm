@@ -4,6 +4,7 @@ from typing import Any
 from supabase import Client, create_client
 
 from config import settings
+from services.store_shared import prefer_project_description, prefer_project_title
 
 _client: Client | None = None
 
@@ -51,7 +52,7 @@ def list_projects(
     if q:
         merged["q"] = q
     items = apply_project_filters(items, merged)
-    items = sort_projects_for_display(items)
+    items = sort_projects_for_display(items, merged.get("sort"))
     total = len(items)
     return items[offset : offset + limit], total
 
@@ -73,15 +74,54 @@ def delete_project(user_id: str, project_id: str) -> bool:
     return True
 
 
+# Statuses that mean the user acted on the project (placed/decided a bid) — never auto-deleted.
+_CLEANUP_KEEP_STATUSES = {"submitted", "won", "lost"}
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def cleanup_old_projects(user_id: str, older_than_days: int = 10) -> int:
+    """Delete the user's projects older than N days, keeping only submitted ones."""
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    client = get_client()
+    res = (
+        client.table("projects")
+        .select("id,freelancer_project_id,status,discovered_at,first_seen_at")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    rows = res.data or []
+
+    to_delete: list[str] = []
+    for row in rows:
+        if (row.get("status") or "new") in _CLEANUP_KEEP_STATUSES:
+            continue
+        # Age by the Freelancer posted time (shown as "X weeks ago"), not our save time.
+        posted = _parse_iso(row.get("first_seen_at") or row.get("discovered_at"))
+        if posted is None or posted >= cutoff:
+            continue
+        to_delete.append(row["id"])
+
+    for project_id in to_delete:
+        client.table("projects").delete().eq("id", project_id).eq("user_id", user_id).execute()
+    return len(to_delete)
+
+
 def get_project_status_map(user_id: str) -> dict[str, str]:
     res = get_client().table("projects").select("freelancer_project_id,status").eq("user_id", user_id).execute()
     return {r["freelancer_project_id"]: r["status"] for r in (res.data or [])}
-
-
-def _keep_nonempty_text(new: str | None, existing: str | None) -> str:
-    if new and str(new).strip():
-        return new
-    return existing or ""
 
 
 def _merge_clarifications(existing: list | None, new: list | None) -> list:
@@ -140,8 +180,8 @@ def upsert_project(user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         if data.get("submitted_delivery_days") is not None:
             snapshot["submitted_delivery_days"] = data["submitted_delivery_days"]
         updated = {
-            "title": data.get("title", row["title"]),
-            "description": _keep_nonempty_text(data.get("description"), row.get("description")),
+            "title": prefer_project_title(data.get("title"), row.get("title")),
+            "description": prefer_project_description(data.get("description"), row.get("description")),
             "budget_text": data.get("budget_text") or row.get("budget_text"),
             "budget_type": data.get("budget_type") or row.get("budget_type") or "unknown",
             "budget_min": data.get("budget_min") if data.get("budget_min") is not None else row.get("budget_min"),
@@ -163,8 +203,8 @@ def upsert_project(user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         "user_id": user_id,
         "freelancer_project_id": data["freelancer_project_id"],
         "url": data["url"],
-        "title": data["title"],
-        "description": data.get("description", ""),
+        "title": prefer_project_title(data.get("title"), "Untitled"),
+        "description": prefer_project_description(data.get("description"), ""),
         "budget_text": data.get("budget_text"),
         "budget_type": data.get("budget_type", "unknown"),
         "budget_min": data.get("budget_min"),
@@ -480,6 +520,7 @@ def update_profile(user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         if k in {
             "display_name", "title", "bio", "skills", "hourly_rate_min",
             "hourly_rate_max", "proposal_style", "default_direction", "default_model_tier",
+            "question_count", "proposal_model",
         }
     }
     allowed["updated_at"] = _now()

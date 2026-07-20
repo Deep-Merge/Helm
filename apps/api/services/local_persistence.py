@@ -52,9 +52,15 @@ def load_store(state: dict[str, Any]) -> bool:
 def save_store(state: dict[str, Any]) -> None:
     if not settings.local_persistence:
         return
+    write_serialized(serialize_store(state))
 
-    path = data_file_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+
+def serialize_store(state: dict[str, Any]) -> str:
+    """Serialize the store state to a JSON string.
+
+    Must be called on the same thread that mutates the store (no locking),
+    so the resulting string is a consistent snapshot.
+    """
     payload = {
         "projects": state["projects"],
         "bids": state["bids"],
@@ -67,6 +73,16 @@ def save_store(state: dict[str, Any]) -> None:
         "users": state.get("users", {}),
         "user_project_status": state.get("user_project_status", {}),
     }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def write_serialized(text: str) -> None:
+    """Atomically write an already-serialized store payload to disk."""
+    if not settings.local_persistence:
+        return
+    path = data_file_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
+

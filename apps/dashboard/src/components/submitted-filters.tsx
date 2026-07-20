@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { BUDGET_TYPE_OPTIONS, FilterNumberInput, FilterSelect } from "@/components/filter-field";
+import { ProjectNameSearch } from "@/components/project-name-search";
 import { getBrowserTimezoneOffset, getLast7DaysRange, type DateRange } from "@/lib/date-range";
 import type { SubmittedFilterValues } from "@/lib/submitted-filters";
 import {
@@ -70,8 +71,12 @@ export function SubmittedFilters({ initial }: { initial: SubmittedFilterValues }
     applyNow(defaultSubmittedFilters());
   }
 
+  function onSearchChange(q: string) {
+    applyNow({ ...values, q });
+  }
+
   return (
-    <div className="glass mb-6 overflow-visible rounded-2xl p-3">
+    <div className="glass overflow-visible rounded-2xl p-3">
       <div className="flex flex-wrap items-center gap-2 overflow-visible">
         <FilterSelect
           className="w-[108px]"
@@ -103,6 +108,8 @@ export function SubmittedFilters({ initial }: { initial: SubmittedFilterValues }
           onChange={onDateRangeChange}
           label="Bid date range"
         />
+
+        <ProjectNameSearch value={values.q} onChange={onSearchChange} />
 
         <button
           type="button"

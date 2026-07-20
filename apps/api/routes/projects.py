@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from auth import AuthContext, get_auth
-from models import ProjectSyncRequest, StatusUpdateRequest
+from models import ClarificationsUpdateRequest, ProjectSyncRequest, StatusUpdateRequest
+from services.freelancer_search import fetch_freelancer_projects_by_ids
 from services import store
 from services.discover import discover_projects as run_discover
 from services.project_filters import apply_project_filters, count_pipeline_buckets
@@ -84,6 +85,7 @@ async def list_projects(
     bid_max: float | None = None,
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
+    include_day_counts: bool = False,
     auth: AuthContext = Depends(get_auth),
 ):
     filters: dict = _build_list_filters(
@@ -120,7 +122,16 @@ async def list_projects(
         filters,
         persistent=auth.persistent,
     )
-    return {"projects": projects, "total": total}
+    response: dict = {"projects": projects, "total": total}
+    if include_day_counts:
+        response["day_counts"] = store.count_projects_by_day(
+            auth.user_id,
+            status,
+            q,
+            filters,
+            persistent=auth.persistent,
+        )
+    return response
 
 
 @router.post("/discover")
@@ -135,6 +146,10 @@ async def discover_projects(
     budget_type: str | None = None,
     types: str | None = None,
     days: int | None = Query(None, ge=1, le=365),
+    date_from: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    tz_offset: int | None = Query(None, ge=-720, le=840),
+    sort: str | None = Query(None, pattern="^(newest|price_asc|price_desc)$"),
     exclude_submitted: bool = False,
     pipeline: str | None = Query(None, pattern="^(all|new|seen|submitted)$"),
     page: int = Query(1, ge=1),
@@ -174,6 +189,16 @@ async def discover_projects(
         days=days,
         pipeline=pipeline,
     )
+    if date_from:
+        filters["date_from"] = date_from
+        filters["date_field"] = "seen"
+    if date_to:
+        filters["date_to"] = date_to
+        filters["date_field"] = "seen"
+    if tz_offset is not None:
+        filters["tz_offset"] = tz_offset
+    if sort:
+        filters["sort"] = sort
 
     list_offset = (page - 1) * list_limit
     projects, total, unseen = store.list_projects(
@@ -250,10 +275,36 @@ async def get_project(project_id: str, auth: AuthContext = Depends(get_auth)):
 
 @router.post("/sync")
 async def sync_projects(body: ProjectSyncRequest, auth: AuthContext = Depends(get_auth)):
-    synced = [
-        store.upsert_project(auth.user_id, p.model_dump(), persistent=auth.persistent)
-        for p in body.projects
-    ]
+    incoming = [p.model_dump() for p in body.projects]
+
+    enriched_by_id: dict[str, dict] = {}
+    try:
+        enriched_by_id = await fetch_freelancer_projects_by_ids(
+            [str(item.get("freelancer_project_id") or "").strip() for item in incoming]
+        )
+    except Exception:
+        enriched_by_id = {}
+
+    synced: list[dict] = []
+    for item in incoming:
+        fid = str(item.get("freelancer_project_id") or "").strip()
+        enriched = enriched_by_id.get(fid) or {}
+
+        merged = {**item, **enriched}
+
+        # Preserve fields that are only available from extension flows.
+        if item.get("clarifications"):
+            merged["clarifications"] = item["clarifications"]
+        if item.get("submitted_bid_amount") is not None:
+            merged["submitted_bid_amount"] = item["submitted_bid_amount"]
+        if item.get("submitted_delivery_days") is not None:
+            merged["submitted_delivery_days"] = item["submitted_delivery_days"]
+
+        if item.get("url") and not merged.get("url"):
+            merged["url"] = item["url"]
+
+        synced.append(store.upsert_project(auth.user_id, merged, persistent=auth.persistent))
+
     if synced:
         store.rebuild_user_project_skills(auth.user_id, persistent=auth.persistent)
     return {"synced": len(synced), "projects": synced}
@@ -271,6 +322,43 @@ async def update_status(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"project": project}
+
+
+@router.patch("/{project_id}/clarifications")
+async def update_clarifications(
+    project_id: str,
+    body: ClarificationsUpdateRequest,
+    auth: AuthContext = Depends(get_auth),
+):
+    project = store.get_project(auth.user_id, project_id, persistent=auth.persistent)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    clarifications = body.clarifications
+    if not body.replace:
+        from services.store_shared import merge_clarifications
+
+        clarifications = merge_clarifications(project.get("clarifications"), clarifications)
+
+    updated = store.update_project(
+        auth.user_id,
+        project_id,
+        {"clarifications": clarifications},
+        persistent=auth.persistent,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"project": updated, "count": len(clarifications or [])}
+
+
+@router.post("/cleanup")
+async def cleanup_old_projects(
+    days: int = Query(10, ge=1, le=365),
+    auth: AuthContext = Depends(get_auth),
+):
+    """Delete projects older than `days`, keeping any the user submitted or bid on."""
+    deleted = store.cleanup_old_projects(auth.user_id, days, persistent=auth.persistent)
+    return {"deleted": deleted, "days": days}
 
 
 @router.delete("/{project_id}")

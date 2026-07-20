@@ -34,8 +34,12 @@ import {
   parseFindPage,
   parseFindStatus,
   toSearchParams,
+  findDateRange,
+  withFindDateRange,
+  type FindPriceSort,
   type FindStatusFilter,
 } from "@/lib/project-filters";
+import { getBrowserTimezoneOffset, type DateRange } from "@/lib/date-range";
 
 function filtersToQuery(
   filters: ReturnType<typeof parseFilterSearchParams>,
@@ -191,37 +195,6 @@ function FindPageLayout({
   );
 }
 
-function NewProjectsBanner({
-  count,
-  onDismiss,
-}: {
-  count: number;
-  onDismiss: () => void;
-}) {
-  useEffect(() => {
-    if (count <= 0) return;
-    const id = setTimeout(onDismiss, 8000);
-    return () => clearTimeout(id);
-  }, [count, onDismiss]);
-
-  if (count <= 0) return null;
-
-  return (
-    <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3">
-      <p className="text-base text-emerald-200">
-        {count} new matching project{count !== 1 ? "s" : ""} on your list — updated
-      </p>
-      <button
-        type="button"
-        onClick={onDismiss}
-        className="shrink-0 text-sm text-emerald-300/80 hover:text-emerald-200"
-      >
-        Dismiss
-      </button>
-    </div>
-  );
-}
-
 export function FindPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -316,16 +289,40 @@ export function FindPageClient() {
     void refreshForList(listKey, { filters: query, silent: true });
   }, [listKey, query, refreshForList]);
 
+  function pushFindUrl(
+    nextFilters: ReturnType<typeof parseFilterSearchParams>,
+    nextStatus: FindStatusFilter,
+    nextPage = 1,
+  ) {
+    const params = toSearchParams(nextFilters, false, nextPage, nextStatus);
+    if (
+      nextFilters.range !== "all" &&
+      (nextFilters.date_from || nextFilters.date_to)
+    ) {
+      params.set("tz_offset", String(getBrowserTimezoneOffset()));
+    }
+    router.replace(`/find?${params.toString()}`, { scroll: false });
+  }
+
   function buildHref(nextStatus: FindStatusFilter, nextPage = page) {
     return `/find?${toSearchParams(filters, false, nextPage, nextStatus).toString()}`;
   }
 
+  function handleStatusChange(nextStatus: FindStatusFilter) {
+    pushFindUrl(filters, nextStatus, 1);
+  }
+
+  function handleDateRangeChange(range: DateRange) {
+    pushFindUrl(withFindDateRange(filters, range), status, 1);
+  }
+
+  function handleSortChange(nextSort: FindPriceSort) {
+    pushFindUrl({ ...filters, sort: nextSort }, status, 1);
+  }
+
   function handleSearchChange(q: string) {
     setLiveQ(q);
-    router.replace(
-      `/find?${toSearchParams({ ...filters, q }, false, 1, status).toString()}`,
-      { scroll: false },
-    );
+    pushFindUrl({ ...filters, q }, status, 1);
   }
 
   const hasResults = state.projects.length > 0;
@@ -396,6 +393,13 @@ export function FindPageClient() {
                 showPagination={true}
                 searchQuery={liveQ}
                 onSearchChange={handleSearchChange}
+                refreshNewFound={recentPollNew}
+                onDismissRefreshNewFound={dismissRecentPollNew}
+                dateRange={findDateRange(filters)}
+                onDateRangeChange={handleDateRangeChange}
+                sort={filters.sort}
+                onSortChange={handleSortChange}
+                onStatusChange={handleStatusChange}
               />
             </div>
           )}
@@ -419,7 +423,6 @@ export function FindPageClient() {
               {state.error}
             </p>
           )}
-          <NewProjectsBanner count={recentPollNew} onDismiss={dismissRecentPollNew} />
           {isInitialLoad && (
             <DiscoverLoadingIndicator message={loadingMessage()} />
           )}

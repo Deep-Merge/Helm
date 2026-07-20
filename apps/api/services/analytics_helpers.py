@@ -21,12 +21,19 @@ def _parse_iso(value: str | None) -> datetime | None:
         return None
 
 
-def _utc_midnight(dt: datetime) -> datetime:
-    return dt.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+def _tz_from_offset(tz_offset_minutes: int) -> timezone:
+    """Build a fixed-offset timezone. Offset is minutes to add to UTC to get local
+    time (e.g. EST = -300). Matches -(new Date().getTimezoneOffset()) in the browser."""
+    minutes = max(-1440, min(1440, int(tz_offset_minutes or 0)))
+    return timezone(timedelta(minutes=minutes))
 
 
-def _period_key(dt: datetime, granularity: str) -> str:
-    dt = _utc_midnight(dt)
+def _day_start(dt: datetime, tz: timezone = timezone.utc) -> datetime:
+    return dt.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _period_key(dt: datetime, granularity: str, tz: timezone = timezone.utc) -> str:
+    dt = _day_start(dt, tz)
     if granularity == "week":
         iso = dt.isocalendar()
         return f"{iso.year}-W{iso.week:02d}"
@@ -56,9 +63,11 @@ def _period_label(key: str, granularity: str) -> str:
     return key
 
 
-def _iter_period_keys(start: datetime, end: datetime, granularity: str) -> list[str]:
-    start = _utc_midnight(start)
-    end = _utc_midnight(end)
+def _iter_period_keys(
+    start: datetime, end: datetime, granularity: str, tz: timezone = timezone.utc
+) -> list[str]:
+    start = _day_start(start, tz)
+    end = _day_start(end, tz)
     keys: list[str] = []
 
     if granularity == "day":
@@ -105,6 +114,8 @@ def saved_filter_to_filter_dict(row: dict[str, Any]) -> dict[str, Any]:
         "skills": list(row.get("skills") or []),
         "min_budget": row.get("min_budget"),
         "max_budget": row.get("max_budget"),
+        "hourly_min": row.get("min_hourly"),
+        "hourly_max": row.get("max_hourly"),
         "exclude_submitted": bool(row.get("exclude_submitted", False)),
     }
     if row.get("q"):
@@ -164,9 +175,11 @@ def _filter_submitted(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [p for p in projects if p.get("status") in SUBMITTED_STATUSES]
 
 
-def _submitted_in_period(projects: list[dict[str, Any]], days: int) -> list[dict[str, Any]]:
+def _submitted_in_period(
+    projects: list[dict[str, Any]], days: int, tz: timezone = timezone.utc
+) -> list[dict[str, Any]]:
     now = datetime.now(timezone.utc)
-    range_start = _utc_midnight(now) - timedelta(days=max(1, days) - 1)
+    range_start = _day_start(now, tz) - timedelta(days=max(1, days) - 1)
     result: list[dict[str, Any]] = []
     for project in projects:
         submitted_at = _parse_iso(project.get("submitted_at"))
@@ -185,9 +198,10 @@ def compute_submitted_analysis(
     projects: list[dict[str, Any]],
     *,
     days: int = 30,
+    tz_offset_minutes: int = 0,
 ) -> dict[str, Any]:
     submitted = _filter_submitted(projects)
-    period_submitted = _submitted_in_period(submitted, days)
+    period_submitted = _submitted_in_period(submitted, days, _tz_from_offset(tz_offset_minutes))
 
     budget_mids = [v for p in submitted if (v := _project_budget_mid(p)) is not None]
     period_budget_mids = [v for p in period_submitted if (v := _project_budget_mid(p)) is not None]
@@ -273,6 +287,7 @@ def compute_analytics_report(
     days: int = 30,
     granularity: str = "day",
     preset: dict[str, str] | None = None,
+    tz_offset_minutes: int = 0,
 ) -> dict[str, Any]:
     project_ids = {p["id"] for p in projects}
     filtered_events = [
@@ -280,7 +295,13 @@ def compute_analytics_report(
     ] if project_ids else []
 
     pipeline = compute_pipeline_summary(projects)
-    timeline_data = compute_timeline(projects, filtered_events, days=days, granularity=granularity)
+    timeline_data = compute_timeline(
+        projects,
+        filtered_events,
+        days=days,
+        granularity=granularity,
+        tz_offset_minutes=tz_offset_minutes,
+    )
 
     submitted_bids = [
         float(p["submitted_bid_amount"])
@@ -300,7 +321,9 @@ def compute_analytics_report(
         "skills": compute_top_skills(projects),
         "countries": compute_top_countries(projects),
         "budget_types": compute_budget_breakdown(projects),
-        "submitted_analysis": compute_submitted_analysis(projects, days=days),
+        "submitted_analysis": compute_submitted_analysis(
+            projects, days=days, tz_offset_minutes=tz_offset_minutes
+        ),
         "insights": {
             **compute_insights(pipeline, timeline_data["period_totals"]),
             "avg_submitted_bid": avg_submitted_bid,
@@ -334,12 +357,14 @@ def compute_timeline(
     *,
     days: int = 30,
     granularity: str = "day",
+    tz_offset_minutes: int = 0,
 ) -> dict[str, Any]:
     if granularity not in ("day", "week", "month"):
         granularity = "day"
 
+    tz = _tz_from_offset(tz_offset_minutes)
     now = datetime.now(timezone.utc)
-    range_start = _utc_midnight(now) - timedelta(days=max(1, days) - 1)
+    range_start = _day_start(now, tz) - timedelta(days=max(1, days) - 1)
 
     buckets: dict[str, dict[str, int]] = defaultdict(
         lambda: {"discovered": 0, "seen": 0, "submitted": 0},
@@ -348,19 +373,19 @@ def compute_timeline(
     for project in projects:
         discovered_at = _parse_iso(project.get("first_seen_at") or project.get("discovered_at"))
         if discovered_at and discovered_at >= range_start:
-            key = _period_key(discovered_at, granularity)
+            key = _period_key(discovered_at, granularity, tz)
             buckets[key]["discovered"] += 1
 
         submitted_at = _parse_iso(project.get("submitted_at"))
         if submitted_at and submitted_at >= range_start:
-            key = _period_key(submitted_at, granularity)
+            key = _period_key(submitted_at, granularity, tz)
             buckets[key]["submitted"] += 1
 
     seen_events = _first_seen_events(events or [])
     if seen_events:
         for created in seen_events.values():
             if created >= range_start:
-                key = _period_key(created, granularity)
+                key = _period_key(created, granularity, tz)
                 buckets[key]["seen"] += 1
     else:
         for project in projects:
@@ -369,10 +394,10 @@ def compute_timeline(
                 continue
             seen_at = _parse_iso(project.get("last_seen_at") or project.get("first_seen_at"))
             if seen_at and seen_at >= range_start:
-                key = _period_key(seen_at, granularity)
+                key = _period_key(seen_at, granularity, tz)
                 buckets[key]["seen"] += 1
 
-    period_keys = _iter_period_keys(range_start, now, granularity)
+    period_keys = _iter_period_keys(range_start, now, granularity, tz)
     timeline = [
         {
             "period": key,

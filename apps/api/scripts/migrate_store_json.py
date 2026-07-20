@@ -412,10 +412,10 @@ def migrate_if_needed(*, force: bool = False) -> bool:
             cur.execute(
                 """
                 INSERT INTO saved_filters (
-                  id, user_id, name, q, countries, skills, min_budget, max_budget,
-                  budget_type, exclude_submitted, days, created_at
+                                    id, user_id, name, q, countries, skills, min_budget, max_budget,
+                                    min_hourly, max_hourly, budget_type, exclude_submitted, days, created_at
                 ) VALUES (
-                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, now())
+                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, now())
                 )
                 ON CONFLICT (id) DO NOTHING
                 """,
@@ -428,6 +428,8 @@ def migrate_if_needed(*, force: bool = False) -> bool:
                     saved.get("skills", []),
                     saved.get("min_budget"),
                     saved.get("max_budget"),
+                    saved.get("min_hourly"),
+                    saved.get("max_hourly"),
                     saved.get("budget_type", "any"),
                     saved.get("exclude_submitted", True),
                     saved.get("days"),

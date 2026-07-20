@@ -67,6 +67,9 @@ function mergePreservedStatuses(prev: Project[], next: Project[]): Project[] {
 
 type DiscoverMode = "full" | "incremental" | "local" | "rate_limited" | "throttled";
 
+/** How often to cheaply re-list stored projects so extension-synced items appear fast. */
+const FAST_LOCAL_REFRESH_MS = 7000;
+
 type MonitorState = {
   projects: Project[];
   total: number;
@@ -140,6 +143,7 @@ export function DiscoverMonitorProvider({ children }: { children: ReactNode }) {
   const onFindPage = pathname === "/find" || pathname.startsWith("/find/");
   const filtersRef = useRef(readPersistedDiscoverQuery());
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const localRefreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const refreshInFlightRef = useRef(false);
   const pendingListRefreshRef = useRef<RefreshOptions | null>(null);
   const seenLocallyRef = useRef(new Set<string>());
@@ -267,18 +271,19 @@ export function DiscoverMonitorProvider({ children }: { children: ReactNode }) {
         };
       });
 
+      const newSavedCount = result.new ?? 0;
       const newMatchingCount = result.new_matching ?? 0;
       const matchingNewTitles = result.new_matching_titles ?? [];
 
-      // Alert only when newly discovered projects match the active Find filters.
-      if (!localOnly && newMatchingCount > 0 && hadPriorList) {
-        if (onFindPage) {
-          if (silent) setRecentPollNew(newMatchingCount);
-          setUnreadNew(0);
-        } else {
-          setUnreadNew((n) => n + newMatchingCount);
-        }
+      if (!localOnly && onFindPage) {
+        setRecentPollNew(newSavedCount);
+        setUnreadNew(0);
+      } else if (!localOnly && newMatchingCount > 0 && hadPriorList) {
+        setUnreadNew((n) => n + newMatchingCount);
+      }
 
+      // Desktop alert when newly discovered projects match the active Find filters.
+      if (!localOnly && newMatchingCount > 0 && hadPriorList) {
         if (canShowDesktopNotifications()) {
           notifyNewProjectsDiscovered({
             count: newMatchingCount,
@@ -449,6 +454,46 @@ export function DiscoverMonitorProvider({ children }: { children: ReactNode }) {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
   }, [refresh, pollIntervalSec, autoRefreshEnabled]);
+
+  // Fast local re-list: surfaces projects the extension just synced to the
+  // backend within a few seconds, without triggering an expensive Freelancer
+  // discover call. This is decoupled from the (slower) discover poll above.
+  useEffect(() => {
+    if (!onFindPage || !autoRefreshEnabled) {
+      if (localRefreshTimerRef.current) {
+        clearInterval(localRefreshTimerRef.current);
+        localRefreshTimerRef.current = null;
+      }
+      return;
+    }
+
+    const tick = () => {
+      if (document.visibilityState !== "visible") return;
+      void refresh({ silent: true, localOnly: true, filters: filtersRef.current });
+    };
+
+    localRefreshTimerRef.current = setInterval(tick, FAST_LOCAL_REFRESH_MS);
+    return () => {
+      if (localRefreshTimerRef.current) clearInterval(localRefreshTimerRef.current);
+    };
+  }, [refresh, onFindPage, autoRefreshEnabled]);
+
+  // Instant push: the browser extension relays a NEW_PROJECTS event (via a
+  // content-script bridge) the moment it syncs newly-detected projects. Refresh
+  // the stored list immediately instead of waiting for the next poll tick.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const onExtensionMessage = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      const data = event.data as { source?: string; type?: string } | null;
+      if (data?.source !== "helm-extension" || data.type !== "NEW_PROJECTS") return;
+      void refresh({ silent: true, localOnly: true, filters: filtersRef.current });
+    };
+
+    window.addEventListener("message", onExtensionMessage);
+    return () => window.removeEventListener("message", onExtensionMessage);
+  }, [refresh]);
 
   const value = useMemo(
     () => ({

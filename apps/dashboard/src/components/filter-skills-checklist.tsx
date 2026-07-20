@@ -68,16 +68,22 @@ export function FilterSkillsChecklist({
     onChange([...selected, skill]);
   }
 
-  const sortedSelected = useMemo(
-    () =>
-      sortSkillsAlphabetically(
-        selected.map((skill) => ({
-          skill,
-          count: optionByKey.get(skill.toLowerCase())?.count ?? 0,
-        })),
-      ),
-    [selected, optionByKey],
-  );
+  const sortedSelected = useMemo(() => {
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const skill of selected) {
+      const key = skill.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(skill);
+    }
+    return sortSkillsAlphabetically(
+      unique.map((skill) => ({
+        skill,
+        count: optionByKey.get(skill.toLowerCase())?.count ?? 0,
+      })),
+    );
+  }, [selected, optionByKey]);
 
   return (
     <div className="space-y-2.5">

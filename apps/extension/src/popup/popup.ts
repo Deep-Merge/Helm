@@ -9,7 +9,7 @@ import {
 } from "../lib/api";
 import { initHotkeyEditor } from "./hotkey-editor";
 
-const DASHBOARD_URL = "http://localhost:3000";
+const DASHBOARD_URL = "http://localhost:3001";
 
 function setHotkeyStatus(message: string, type: "error" | "info" = "info") {
   const el = document.getElementById("hotkey-status");

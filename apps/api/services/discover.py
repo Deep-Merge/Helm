@@ -17,6 +17,10 @@ DEEP_SCAN_MAX_PAGES = 30
 DEEP_SCAN_FROM_TIME_OVERLAP_SEC = 300
 # Manual refresh scans at least this far back (covers multi-hour gaps)
 FORCE_FULL_MIN_LOOKBACK_SEC = 12 * 3600
+# Once-per-day maintenance: purge stale projects the user never acted on
+DAILY_CLEANUP_FP = "daily_cleanup"
+CLEANUP_INTERVAL_SEC = 24 * 3600
+CLEANUP_OLDER_THAN_DAYS = 10
 
 
 def _parse_discover_time(value: Any) -> datetime | None:
@@ -52,6 +56,21 @@ def _seconds_since(cursor_at: datetime | None) -> float | None:
 def _set_cursor(backend: Any, user_id: str, filter_fp: str, at: datetime) -> None:
     if hasattr(backend, "set_discover_cursor"):
         backend.set_discover_cursor(user_id, filter_fp, at.isoformat())
+
+
+def _maybe_run_daily_cleanup(backend: Any, user_id: str) -> None:
+    """Once per 24h, delete projects older than N days except ones the user submitted/bid on."""
+    if not hasattr(backend, "cleanup_old_projects"):
+        return
+    since = _seconds_since(_get_cursor(backend, user_id, DAILY_CLEANUP_FP))
+    if since is not None and since < CLEANUP_INTERVAL_SEC:
+        return
+    # Claim the daily slot before running so concurrent refreshes don't repeat the purge.
+    _set_cursor(backend, user_id, DAILY_CLEANUP_FP, datetime.now(timezone.utc))
+    try:
+        backend.cleanup_old_projects(user_id, CLEANUP_OLDER_THAN_DAYS)
+    except Exception:
+        pass
 
 
 def _freelancer_backoff_remaining(backend: Any, user_id: str) -> int | None:
@@ -152,6 +171,8 @@ async def discover_projects(
     )
 
     backend = _backend(persistent)
+
+    _maybe_run_daily_cleanup(backend, user_id)
 
     if local_only:
         return {"fetched": 0, "new": 0, "mode": "local"}

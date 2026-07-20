@@ -19,3 +19,5 @@ Thumbs.db
 apps/extension/dist/
 apps/api/data/
 docs/
+installer/dist/
+installer/output/

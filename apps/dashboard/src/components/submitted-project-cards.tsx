@@ -7,15 +7,18 @@ import {
   ClientReviewCount,
 } from "@/components/client-table-cells";
 import { formatBudgetTypeLabel } from "@/components/filter-field";
+import { formatProjectBudgetText } from "@/lib/project-budget";
 import { CopyProjectUrlButton } from "@/components/copy-project-url-button";
 import { DeleteProjectButton } from "@/components/delete-project-button";
 import { OpenProjectButton } from "@/components/open-project-button";
 import { RelativeTime } from "@/components/relative-time";
 import { useDiscoverMonitor } from "@/components/discover-monitor";
 import type { Project } from "@/lib/api";
-import { formatSubmittedDayLabel, localDayFromIso } from "@/lib/date-range";
+import { formatSubmittedDayHeading, localDayFromIso } from "@/lib/date-range";
 import { markProjectAsSeen } from "@/lib/mark-project-seen";
-import { openFreelancerFromClick, openFreelancerInNewTab, isBackgroundOpenModifier } from "@/lib/open-freelancer";
+import { openProjectDetailInNewTab } from "@/lib/open-project-detail";
+import { openFreelancerInNewTab, isBackgroundOpenModifier } from "@/lib/open-freelancer";
+import { cacheProject } from "@/lib/project-cache";
 import { withReturnTo } from "@/lib/return-to";
 
 function formatBid(amount: number | null | undefined, budgetType?: string) {
@@ -62,7 +65,7 @@ function groupBySubmittedDay(projects: Project[]) {
     .sort(([a], [b]) => b.localeCompare(a))
     .map(([day, dayProjects]) => ({
       day,
-      label: formatSubmittedDayLabel(day),
+      heading: formatSubmittedDayHeading(day),
       projects: dayProjects.sort((a, b) => {
         const ta = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
         const tb = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
@@ -88,8 +91,14 @@ function SubmittedProjectCard({
     : `/projects/${project.id}`;
   const outcome = outcomeLabel(project.status);
 
-  function openDetails() {
+  function openDetails(event?: React.MouseEvent | React.KeyboardEvent) {
+    cacheProject(project);
     markProjectAsSeen(project, markProjectSeen, confirmProjectSeenOnServer, { skipServer: true });
+    if (event && isBackgroundOpenModifier(event)) {
+      event.preventDefault();
+      openProjectDetailInNewTab(detailHref, { background: true });
+      return;
+    }
     router.push(detailHref);
   }
 
@@ -97,11 +106,11 @@ function SubmittedProjectCard({
     <div
       role="button"
       tabIndex={0}
-      onClick={openDetails}
+      onClick={(event) => openDetails(event)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          openDetails();
+          openDetails(event);
         }
       }}
       className="group block cursor-pointer rounded-xl outline-none ring-1 ring-emerald-400/35 ring-offset-1 ring-offset-[#09090b] transition hover:ring-emerald-300/55 focus-visible:ring-emerald-300/70"
@@ -130,9 +139,12 @@ function SubmittedProjectCard({
             <h3 className="truncate text-base font-semibold text-emerald-50 group-hover:text-white">
               {project.title}
             </h3>
-            {project.budget_text && (
-              <p className="mt-0.5 truncate text-xs text-emerald-200/60">{project.budget_text}</p>
-            )}
+            {(() => {
+              const budgetText = formatProjectBudgetText(project);
+              return budgetText ? (
+                <p className="mt-0.5 truncate text-xs text-emerald-200/60">{budgetText}</p>
+              ) : null;
+            })()}
           </div>
           <div className="shrink-0 text-right">
             <p className="text-lg font-bold tabular-nums text-emerald-50">
@@ -183,18 +195,29 @@ function SubmittedProjectCard({
 export function SubmittedProjectCards({
   projects,
   returnTo,
+  searchQuery = "",
+  dayCounts,
 }: {
   projects: Project[];
   returnTo?: string;
+  searchQuery?: string;
+  dayCounts?: Record<string, number>;
 }) {
   const { markProjectSeen, confirmProjectSeenOnServer } = useDiscoverMonitor();
   const groups = groupBySubmittedDay(projects);
 
   if (projects.length === 0) {
+    const hasSearch = searchQuery.length > 0;
     return (
       <div className="glass flex flex-col items-center justify-center rounded-xl py-12 text-center">
-        <p className="text-base font-medium text-zinc-300">No submitted projects in this range</p>
-        <p className="mt-1 text-sm text-zinc-500">Try a wider date range or place bids on Freelancer.</p>
+        <p className="text-base font-medium text-zinc-300">
+          {hasSearch ? "No projects match your search" : "No submitted projects in this range"}
+        </p>
+        <p className="mt-1 text-sm text-zinc-500">
+          {hasSearch
+            ? "Try a different name or clear the search box."
+            : "Try a wider date range or place bids on Freelancer."}
+        </p>
       </div>
     );
   }
@@ -203,10 +226,15 @@ export function SubmittedProjectCards({
     <div className="space-y-4">
       {groups.map((group) => (
         <section key={group.day}>
-          <div className="mb-1.5 flex items-baseline gap-2">
-            <h2 className="text-sm font-medium text-zinc-300">{group.label}</h2>
-            <span className="text-xs tabular-nums text-zinc-500">
-              {group.projects.length}
+          <div className="mb-3 inline-flex w-auto max-w-full flex-wrap items-center gap-x-2.5 gap-y-1 rounded-xl border border-indigo-400/40 bg-gradient-to-r from-indigo-500/20 via-violet-500/12 to-indigo-500/8 px-4 py-3 shadow-[0_0_28px_-10px_rgba(99,102,241,0.45)] ring-1 ring-indigo-400/30">
+            <h2 className="text-base font-semibold tracking-tight text-indigo-50">
+              {group.heading.title}
+            </h2>
+            <span className="text-sm font-medium tabular-nums text-indigo-200/90">
+              {group.heading.date}
+            </span>
+            <span className="rounded-full bg-amber-500/25 px-2.5 py-0.5 text-xs font-bold tabular-nums text-amber-50 ring-1 ring-amber-400/55">
+              {dayCounts?.[group.day] ?? group.projects.length} submitted
             </span>
           </div>
           <div className="space-y-2">

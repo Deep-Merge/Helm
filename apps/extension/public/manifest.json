@@ -2,15 +2,21 @@
   "manifest_version": 3,
   "name": "Helm",
   "version": "0.1.0",
-  "description": "Freelancer workspace — discover projects, draft proposals, and track pipeline.",
-  "permissions": ["storage", "notifications", "alarms"],
+  "description": "Helm extension",
+  "permissions": ["storage", "notifications", "alarms", "tabs"],
   "host_permissions": [
     "https://www.freelancer.com/*",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
   ],
   "externally_connectable": {
-    "matches": ["http://localhost:3000/*", "https://*.vercel.app/*"]
+    "matches": [
+      "http://localhost:3001/*",
+      "http://127.0.0.1:3001/*",
+      "https://helm.drhelm.uk/*",
+      "https://*.drhelm.uk/*",
+      "https://*.vercel.app/*"
+    ]
   },
   "background": {
     "service_worker": "background/service-worker.js"
@@ -58,11 +64,22 @@
     },
     {
       "matches": [
-        "https://www.freelancer.com/search/projects*",
-        "https://www.freelancer.com/jobs/*"
+        "https://www.freelancer.com/*",
+        "https://freelancer.com/*"
       ],
       "js": ["content/listing.js"],
       "css": ["content/listing.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost:3001/*",
+        "http://127.0.0.1:3001/*",
+        "https://helm.drhelm.uk/*",
+        "https://*.drhelm.uk/*",
+        "https://*.vercel.app/*"
+      ],
+      "js": ["content/bridge.js"],
       "run_at": "document_idle"
     }
   ]

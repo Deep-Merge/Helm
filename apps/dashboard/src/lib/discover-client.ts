@@ -8,14 +8,10 @@ export type DiscoverListFilters = ProjectQueryFilters & {
   page?: number;
   pipeline?: string;
   list_limit?: number;
+  sort?: string;
 };
 
-export function buildFindPageHref(
-  filters: ProjectQueryFilters & { page?: number; pipeline?: string } = {},
-): string {
-  const params = new URLSearchParams();
-  if (filters.page != null && filters.page > 1) params.set("page", String(filters.page));
-  if (filters.pipeline && filters.pipeline !== "all") params.set("status", filters.pipeline);
+function appendSharedDiscoverParams(params: URLSearchParams, filters: DiscoverListFilters) {
   if (filters.q) params.set("q", filters.q);
   if (filters.exclude_countries) params.set("exclude_countries", filters.exclude_countries);
   if (filters.skills) params.set("skills", filters.skills);
@@ -26,7 +22,20 @@ export function buildFindPageHref(
   if (filters.budget_type) params.set("budget_type", filters.budget_type);
   if (filters.types) params.set("types", filters.types);
   if (filters.days != null) params.set("days", String(filters.days));
+  if (filters.date_from) params.set("date_from", filters.date_from);
+  if (filters.date_to) params.set("date_to", filters.date_to);
+  if (filters.tz_offset != null) params.set("tz_offset", String(filters.tz_offset));
+  if (filters.sort) params.set("sort", filters.sort);
   if (filters.exclude_submitted === false) params.set("exclude_submitted", "false");
+}
+
+export function buildFindPageHref(
+  filters: ProjectQueryFilters & { page?: number; pipeline?: string; sort?: string } = {},
+): string {
+  const params = new URLSearchParams();
+  if (filters.page != null && filters.page > 1) params.set("page", String(filters.page));
+  if (filters.pipeline && filters.pipeline !== "all") params.set("status", filters.pipeline);
+  appendSharedDiscoverParams(params, filters);
   const qs = params.toString();
   return qs ? `/find?${qs}` : "/find";
 }
@@ -36,17 +45,7 @@ export async function discoverProjectsClient(
   options: { forceFull?: boolean; localOnly?: boolean } = {},
 ) {
   const params = new URLSearchParams();
-  if (filters.q) params.set("q", filters.q);
-  if (filters.exclude_countries) params.set("exclude_countries", filters.exclude_countries);
-  if (filters.skills) params.set("skills", filters.skills);
-  if (filters.min_budget != null) params.set("min_budget", String(filters.min_budget));
-  if (filters.max_budget != null) params.set("max_budget", String(filters.max_budget));
-  if (filters.min_hourly != null) params.set("min_hourly", String(filters.min_hourly));
-  if (filters.max_hourly != null) params.set("max_hourly", String(filters.max_hourly));
-  if (filters.budget_type) params.set("budget_type", filters.budget_type);
-  if (filters.types) params.set("types", filters.types);
-  if (filters.days != null) params.set("days", String(filters.days));
-  if (filters.exclude_submitted === false) params.set("exclude_submitted", "false");
+  appendSharedDiscoverParams(params, filters);
   if (filters.pipeline && filters.pipeline !== "all") params.set("pipeline", filters.pipeline);
   if (options.forceFull) params.set("force_full", "true");
   if (options.localOnly) params.set("local_only", "true");

@@ -1,4 +1,5 @@
 import type { ProjectQueryFilters } from "@/lib/api";
+import { getBrowserTimezoneOffset } from "@/lib/date-range";
 import { readLastFindPreset } from "@/lib/find-last-preset";
 import type { FindStatusFilter, ProjectFilterValues } from "@/lib/project-filters";
 
@@ -12,7 +13,8 @@ export function filterValuesToDiscoverQuery(
   filters: ProjectFilterValues,
   page: number,
   status: FindStatusFilter,
-): ProjectQueryFilters & { page?: number; pipeline?: string } {
+): ProjectQueryFilters & { page?: number; pipeline?: string; sort?: string } {
+  const hasDateRange = filters.range !== "all" && Boolean(filters.date_from || filters.date_to);
   return {
     q: filters.q || undefined,
     exclude_countries: filters.exclude_countries || undefined,
@@ -26,6 +28,11 @@ export function filterValuesToDiscoverQuery(
     exclude_submitted: false,
     page,
     pipeline: status !== "all" ? status : undefined,
+    date_field: hasDateRange ? "seen" : undefined,
+    date_from: hasDateRange ? filters.date_from || undefined : undefined,
+    date_to: hasDateRange ? filters.date_to || undefined : undefined,
+    tz_offset: hasDateRange ? getBrowserTimezoneOffset() : undefined,
+    sort: filters.sort !== "newest" ? filters.sort : undefined,
   };
 }
 

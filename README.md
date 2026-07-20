@@ -32,7 +32,7 @@ copy .env.local.example .env.local
 npm run dev
 ```
 
-Open http://localhost:3000
+Open http://localhost:3001
 
 ### 4. Chrome Extension
 
@@ -45,7 +45,7 @@ Load `apps/extension/dist` in `chrome://extensions` (Developer mode).
 
 ### 5. Connect extension to your account
 
-1. Sign in at http://localhost:3000 (each user uses their own account)
+1. Sign in at http://localhost:3001 (each user uses their own account)
 2. Open **Connect extension** in the sidebar (or Settings → Extension)
 3. Click **Connect extension** on that page (use Chrome, where the extension is installed)
 4. If auto-connect fails: paste the copied token in the extension popup → **Auth token** → **Save**

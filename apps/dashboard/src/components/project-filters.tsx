@@ -161,6 +161,8 @@ export function ProjectFilters({
         skills: parseCsvList(draft.skills),
         min_budget: draft.min_budget ? Number(draft.min_budget) : null,
         max_budget: draft.max_budget ? Number(draft.max_budget) : null,
+        min_hourly: draft.min_hourly ? Number(draft.min_hourly) : null,
+        max_hourly: draft.max_hourly ? Number(draft.max_hourly) : null,
         budget_type: deriveBudgetType(draft.type_fixed, draft.type_hourly) || "any",
         days: draft.days ? Number(draft.days) : null,
       };

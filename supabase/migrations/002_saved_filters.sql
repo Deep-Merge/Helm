@@ -9,6 +9,8 @@ create table if not exists saved_filters (
   skills text[] default '{}',
   min_budget numeric,
   max_budget numeric,
+  min_hourly numeric,
+  max_hourly numeric,
   budget_type text default 'any',
   exclude_submitted boolean default true,
   days int,

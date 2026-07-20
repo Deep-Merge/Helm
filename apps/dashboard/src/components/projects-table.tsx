@@ -13,8 +13,10 @@ import { useDiscoverMonitor } from "@/components/discover-monitor";
 import { formatBudgetTypeLabel } from "@/components/filter-field";
 import { ProjectStatusBadge } from "@/components/project-status-badge";
 import type { Project } from "@/lib/api";
+import { formatProjectBudgetText } from "@/lib/project-budget";
 import { markProjectAsSeen } from "@/lib/mark-project-seen";
-import { openFreelancerFromClick, openFreelancerInNewTab, isBackgroundOpenModifier } from "@/lib/open-freelancer";
+import { openProjectDetailInNewTab } from "@/lib/open-project-detail";
+import { openFreelancerInNewTab, isBackgroundOpenModifier } from "@/lib/open-freelancer";
 import { projectPostedAt } from "@/lib/relative-time";
 import { withReturnTo } from "@/lib/return-to";
 
@@ -100,23 +102,27 @@ export function ProjectsTable({
               ? withReturnTo(`/projects/${p.id}`, returnTo)
               : `/projects/${p.id}`;
 
-            const openProjectDetails = () => {
+            const openProjectDetails = (event?: React.MouseEvent) => {
               markProjectAsSeen(p, markProjectSeen, confirmProjectSeenOnServer, { skipServer: true });
+              if (event && isBackgroundOpenModifier(event)) {
+                event.preventDefault();
+                openProjectDetailInNewTab(detailHref, { background: true });
+                return;
+              }
               router.push(detailHref);
             };
 
             const openFreelancerProject = (event?: React.MouseEvent) => {
               markProjectAsSeen(p, markProjectSeen, confirmProjectSeenOnServer);
-              if (event && openFreelancerFromClick(p, event)) {
-                return;
-              }
-              openFreelancerInNewTab(p);
+              openFreelancerInNewTab(p, {
+                background: event ? isBackgroundOpenModifier(event) : false,
+              });
             };
 
             const openDefaultRowTarget = (event: React.MouseEvent) => {
               if (isBackgroundOpenModifier(event)) {
                 event.preventDefault();
-                openFreelancerFromClick(p, event);
+                openProjectDetailInNewTab(detailHref, { background: true });
                 markProjectAsSeen(p, markProjectSeen, confirmProjectSeenOnServer, {
                   skipServer: true,
                 });
@@ -131,7 +137,7 @@ export function ProjectsTable({
                 key={p.id}
                 role={isSubmitted ? "button" : undefined}
                 tabIndex={isSubmitted ? 0 : undefined}
-                onClick={isSubmitted ? openProjectDetails : undefined}
+                onClick={(event) => openProjectDetails(event)}
                 onKeyDown={
                   isSubmitted
                     ? (event) => {
@@ -171,7 +177,7 @@ export function ProjectsTable({
                     </button>
                   )}
                 </td>
-                <td className="px-5 py-4 text-zinc-400">{p.budget_text || "—"}</td>
+                <td className="px-5 py-4 text-zinc-400">{formatProjectBudgetText(p) || "—"}</td>
                 {isSubmitted && (
                   <>
                     <td className="px-5 py-4 text-zinc-300">

@@ -6,6 +6,7 @@ import {
 } from "@/lib/date-range";
 
 export type SubmittedFilterValues = {
+  q: string;
   min_budget: string;
   max_budget: string;
   budget_type: string;
@@ -18,6 +19,7 @@ export type SubmittedFilterValues = {
 export function defaultSubmittedFilters(): SubmittedFilterValues {
   const range = getLast7DaysRange();
   return {
+    q: "",
     min_budget: "",
     max_budget: "",
     budget_type: "any",
@@ -33,6 +35,7 @@ export function parseSubmittedFilterSearchParams(
 ): SubmittedFilterValues {
   if (sp.range === "all") {
     return {
+      q: sp.q || "",
       min_budget: sp.min_budget || "",
       max_budget: sp.max_budget || "",
       budget_type: sp.budget_type || "any",
@@ -45,6 +48,7 @@ export function parseSubmittedFilterSearchParams(
 
   const today = toIsoDate(new Date());
   return {
+    q: sp.q || "",
     min_budget: sp.min_budget || "",
     max_budget: sp.max_budget || "",
     budget_type: sp.budget_type || "any",
@@ -63,6 +67,7 @@ function parseTimezoneOffset(value: string | undefined): number | undefined {
 
 export function toSubmittedSearchParams(values: SubmittedFilterValues): URLSearchParams {
   const params = new URLSearchParams();
+  if (values.q.trim()) params.set("q", values.q.trim());
   if (values.min_budget) params.set("min_budget", values.min_budget);
   if (values.max_budget) params.set("max_budget", values.max_budget);
   if (values.budget_type && values.budget_type !== "any") {
@@ -93,6 +98,7 @@ export function needsDefaultDateRedirect(sp: Record<string, string | undefined>)
 export function buildSubmittedRedirectQuery(sp: Record<string, string | undefined>): string {
   const range = getLast7DaysRange();
   const params = new URLSearchParams();
+  if (sp.q) params.set("q", sp.q);
   if (sp.min_budget) params.set("min_budget", sp.min_budget);
   if (sp.max_budget) params.set("max_budget", sp.max_budget);
   if (sp.budget_type && sp.budget_type !== "any") params.set("budget_type", sp.budget_type);

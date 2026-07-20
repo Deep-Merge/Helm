@@ -3,6 +3,19 @@ import { authorizationHeader } from "@/lib/auth-token";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const res = await fetch(`${API_URL}/projects/${id}`, {
+    headers: await authorizationHeader(),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  return NextResponse.json(data, { status: res.status });
+}
+
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },

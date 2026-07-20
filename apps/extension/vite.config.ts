@@ -24,6 +24,7 @@ export default defineConfig({
         "background/service-worker": resolve(__dirname, "src/background/service-worker.ts"),
         "content/project": resolve(__dirname, "src/content/project.ts"),
         "content/listing": resolve(__dirname, "src/content/listing.ts"),
+        "content/bridge": resolve(__dirname, "src/content/bridge.ts"),
         "popup/popup": resolve(__dirname, "src/popup/popup.ts"),
       },
       output: {

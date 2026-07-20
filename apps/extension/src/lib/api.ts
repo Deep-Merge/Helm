@@ -1,5 +1,5 @@
 const DEFAULT_API_URL = "http://127.0.0.1:8000";
-const DASHBOARD_URL = "http://localhost:3000";
+const DASHBOARD_URL = "http://localhost:3001";
 
 export const LOCAL_DEV_DEFAULTS = {
   apiUrl: DEFAULT_API_URL,
@@ -215,6 +215,17 @@ export async function getProject(projectId: string): Promise<{
   bids: ApiBid[];
 }> {
   return apiFetch(`/projects/${projectId}`);
+}
+
+export async function updateProjectClarifications(
+  projectId: string,
+  clarifications: NonNullable<ApiProject["clarifications"]>,
+  replace = true,
+): Promise<{ project: ApiProject; count: number }> {
+  return apiFetch(`/projects/${projectId}/clarifications`, {
+    method: "PATCH",
+    body: JSON.stringify({ clarifications, replace }),
+  });
 }
 
 export interface Profile {

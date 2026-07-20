@@ -23,6 +23,10 @@ export interface ClarificationEntry {
   posted_at: string | null;
   text: string;
   is_employer_reply: boolean;
+  thread_id?: string | null;
+  parent_id?: string | null;
+  depth?: number;
+  sort_order?: number;
 }
 
 export interface Project {
@@ -91,6 +95,8 @@ export interface SavedFilter {
   skills?: string[];
   min_budget?: number | null;
   max_budget?: number | null;
+  min_hourly?: number | null;
+  max_hourly?: number | null;
   budget_type?: string;
   exclude_submitted?: boolean;
   days?: number | null;
@@ -159,8 +165,11 @@ export type ProjectQueryFilters = {
   bid_min?: number;
   bid_max?: number;
   status?: string;
+  sort?: string;
+  limit?: number;
+  offset?: number;
+  include_day_counts?: boolean;
 };
-
 export async function discoverProjects(
   filters: ProjectQueryFilters = {},
   options: { forceFull?: boolean; localOnly?: boolean } = {},
@@ -209,8 +218,13 @@ export async function getProjectsWithFilters(filters: ProjectQueryFilters = {}) 
   if (filters.bid_min != null) params.set("bid_min", String(filters.bid_min));
   if (filters.bid_max != null) params.set("bid_max", String(filters.bid_max));
   if (filters.status) params.set("status", filters.status);
+  if (filters.limit != null) params.set("limit", String(filters.limit));
+  if (filters.offset != null) params.set("offset", String(filters.offset));
+  if (filters.include_day_counts) params.set("include_day_counts", "true");
   const qs = params.toString();
-  return apiFetch<{ projects: Project[]; total: number }>(`/projects${qs ? `?${qs}` : ""}`);
+  return apiFetch<{ projects: Project[]; total: number; day_counts?: Record<string, number> }>(
+    `/projects${qs ? `?${qs}` : ""}`,
+  );
 }
 
 export async function getSavedFilters() {

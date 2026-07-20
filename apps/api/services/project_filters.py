@@ -189,7 +189,7 @@ def apply_project_filters(items: list[dict[str, Any]], filters: dict[str, Any]) 
                 pmin = project.get("budget_min")
                 if pmin is not None and float(pmin) > float(max_budget):
                     continue
-        elif min_budget is not None or max_budget is not None:
+        elif project_type not in ("fixed", "hourly") and (min_budget is not None or max_budget is not None):
             pmax = project.get("budget_max")
             if min_budget is not None:
                 if pmax is not None and float(pmax) < float(min_budget):

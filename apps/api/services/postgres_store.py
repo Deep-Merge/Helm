@@ -14,6 +14,8 @@ from services.store_shared import (
     merge_client_fields,
     norm_freelancer_id,
     now_iso,
+    prefer_project_description,
+    prefer_project_title,
     prefer_status,
     user_public,
 )
@@ -196,7 +198,7 @@ def list_projects(
     if q:
         merged["q"] = q
     items = apply_project_filters(items, merged)
-    items = sort_projects_for_display(items)
+    items = sort_projects_for_display(items, merged.get("sort"))
     total = len(items)
     page_items = items[offset : offset + limit]
     if return_unseen:
@@ -234,6 +236,48 @@ def delete_project(user_id: str, project_id: str) -> bool:
     if deleted:
         rebuild_user_project_skills(user_id)
     return deleted
+
+
+def cleanup_old_projects(user_id: str, older_than_days: int = 10) -> int:
+    """Delete the user's projects older than N days, keeping only submitted ones."""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT p.id, p.freelancer_project_id
+            FROM projects p
+            WHERE p.user_id = %s
+              AND COALESCE(p.first_seen_at, p.discovered_at) < (now() - make_interval(days => %s))
+              AND NOT EXISTS (
+                  SELECT 1 FROM user_project_status ups
+                  WHERE ups.user_id = p.user_id
+                    AND ups.freelancer_project_id = p.freelancer_project_id
+                    AND ups.status IN ('submitted', 'won', 'lost')
+              )
+            """,
+            (user_id, older_than_days),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return 0
+        ids = [row["id"] for row in rows]
+        fids = [
+            norm_freelancer_id(row["freelancer_project_id"])
+            for row in rows
+            if row.get("freelancer_project_id")
+        ]
+        cur.execute("DELETE FROM project_events WHERE project_id = ANY(%s)", (ids,))
+        cur.execute("DELETE FROM bids WHERE project_id = ANY(%s)", (ids,))
+        cur.execute(
+            "DELETE FROM projects WHERE id = ANY(%s) AND user_id = %s",
+            (ids, user_id),
+        )
+        if fids:
+            cur.execute(
+                "DELETE FROM user_project_status WHERE user_id = %s AND freelancer_project_id = ANY(%s)",
+                (user_id, fids),
+            )
+    rebuild_user_project_skills(user_id)
+    return len(ids)
 
 
 def get_project_status_map(user_id: str) -> dict[str, str]:
@@ -278,8 +322,8 @@ def upsert_project(user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         )
         client_fields = merge_client_fields(existing, data)
         fields = {
-            "title": data.get("title", existing["title"]),
-            "description": keep_nonempty_text(data.get("description"), existing.get("description")),
+            "title": prefer_project_title(data.get("title"), existing.get("title")),
+            "description": prefer_project_description(data.get("description"), existing.get("description")),
             "budget_text": data.get("budget_text") or existing.get("budget_text"),
             "budget_type": data.get("budget_type") or existing.get("budget_type", "unknown"),
             "budget_min": data.get("budget_min") if data.get("budget_min") is not None else existing.get("budget_min"),
@@ -386,8 +430,8 @@ def upsert_project(user_id: str, data: dict[str, Any]) -> dict[str, Any]:
                 user_id,
                 data["freelancer_project_id"],
                 data["url"],
-                data["title"],
-                data.get("description", ""),
+                prefer_project_title(data.get("title"), "Untitled"),
+                prefer_project_description(data.get("description"), ""),
                 data.get("budget_text"),
                 data.get("budget_type", "unknown"),
                 data.get("budget_min"),
@@ -781,8 +825,9 @@ def create_saved_filter(user_id: str, data: dict[str, Any]) -> dict[str, Any]:
     row = fetch_one(
         """
         INSERT INTO saved_filters (
-          id, user_id, name, q, countries, skills, min_budget, max_budget, budget_type, exclude_submitted, days
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    id, user_id, name, q, countries, skills, min_budget, max_budget,
+                    min_hourly, max_hourly, budget_type, exclude_submitted, days
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *
         """,
         (
@@ -794,6 +839,8 @@ def create_saved_filter(user_id: str, data: dict[str, Any]) -> dict[str, Any]:
             data.get("skills", []),
             data.get("min_budget"),
             data.get("max_budget"),
+            data.get("min_hourly"),
+            data.get("max_hourly"),
             data.get("budget_type", "any"),
             data.get("exclude_submitted", True),
             data.get("days"),
@@ -905,14 +952,16 @@ def get_profile(user_id: str) -> dict[str, Any] | None:
         "bio": "",
         "skills": ["React", "Next.js", "Node.js", "TypeScript", "Python", "FastAPI"],
         "proposal_style": "Warm, confident, human. No generic AI tone.",
-        "default_direction": "Explain my approach simply and ask to discuss in Freelancer chat.",
+        "default_direction": "Explain my approach simply.",
         "default_model_tier": "auto",
+        "question_count": 3,
+        "proposal_model": "gpt-4.1",
     }
     with get_cursor() as cur:
         cur.execute(
             """
-            INSERT INTO profiles (id, display_name, title, bio, skills, proposal_style, default_direction, default_model_tier)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::model_tier)
+            INSERT INTO profiles (id, display_name, title, bio, skills, proposal_style, default_direction, default_model_tier, question_count, proposal_model)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::model_tier, %s, %s)
             ON CONFLICT (id) DO NOTHING
             """,
             (
@@ -924,6 +973,8 @@ def get_profile(user_id: str) -> dict[str, Any] | None:
                 default["proposal_style"],
                 default["default_direction"],
                 default["default_model_tier"],
+                default["question_count"],
+                default["proposal_model"],
             ),
         )
     return fetch_one("SELECT * FROM profiles WHERE id = %s", (user_id,)) or default
@@ -940,6 +991,8 @@ def update_profile(user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         "proposal_style",
         "default_direction",
         "default_model_tier",
+        "question_count",
+        "proposal_model",
     }
     fields = {k: v for k, v in data.items() if k in allowed_keys}
     get_profile(user_id)

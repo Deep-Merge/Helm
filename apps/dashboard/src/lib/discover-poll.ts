@@ -1,10 +1,11 @@
 const STORAGE_KEY = "bidautomation_discover_poll_sec";
 const AUTO_REFRESH_KEY = "bidautomation_discover_auto_refresh";
-export const DEFAULT_POLL_SEC = 60;
-export const MIN_POLL_SEC = 60;
+export const DEFAULT_POLL_SEC = 30;
+export const MIN_POLL_SEC = 30;
 export const MAX_POLL_SEC = 600;
 
 export const POLL_INTERVAL_OPTIONS = [
+  { value: 30, label: "30 seconds" },
   { value: 60, label: "1 minute" },
   { value: 120, label: "2 minutes" },
   { value: 300, label: "5 minutes" },

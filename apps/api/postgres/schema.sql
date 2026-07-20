@@ -45,8 +45,10 @@ CREATE TABLE IF NOT EXISTS profiles (
   hourly_rate_min NUMERIC,
   hourly_rate_max NUMERIC,
   proposal_style TEXT DEFAULT 'Warm, confident, human. No generic AI tone.',
-  default_direction TEXT DEFAULT 'Explain my approach simply and ask to discuss in Freelancer chat.',
+  default_direction TEXT DEFAULT 'Explain my approach simply.',
   default_model_tier model_tier DEFAULT 'auto',
+  question_count INT DEFAULT 3,
+  proposal_model TEXT DEFAULT 'gpt-4.1',
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -166,6 +168,8 @@ CREATE TABLE IF NOT EXISTS saved_filters (
   skills TEXT[] DEFAULT '{}',
   min_budget NUMERIC,
   max_budget NUMERIC,
+  min_hourly NUMERIC,
+  max_hourly NUMERIC,
   budget_type TEXT DEFAULT 'any',
   exclude_submitted BOOLEAN DEFAULT true,
   days INT,

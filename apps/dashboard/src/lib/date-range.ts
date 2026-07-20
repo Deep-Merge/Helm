@@ -57,13 +57,25 @@ export function formatShortDay(iso: string): string {
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
-export function formatSubmittedDayLabel(iso: string): string {
+export function formatDotDayDate(iso: string): string {
+  const d = parseIsoDate(iso);
+  if (!d) return iso;
+  return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
+}
+
+export function formatSubmittedDayHeading(iso: string): { title: string; date: string } {
+  const date = formatDotDayDate(iso);
   const today = toIsoDate(new Date());
-  if (iso === today) return "Today";
+  if (iso === today) return { title: "Today", date };
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  if (iso === toIsoDate(yesterday)) return "Yesterday";
-  return formatShortDay(iso);
+  if (iso === toIsoDate(yesterday)) return { title: "Yesterday", date };
+  return { title: formatShortDay(iso), date };
+}
+
+export function formatSubmittedDayLabel(iso: string): string {
+  const { title, date } = formatSubmittedDayHeading(iso);
+  return `${title} · ${date}`;
 }
 
 /** Minutes to add to local time to get UTC — matches JS Date.getTimezoneOffset(). */

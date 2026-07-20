@@ -109,6 +109,10 @@ export async function getAnalyticsReportClient(options: {
   params.set("days", String(options.days ?? 7));
   params.set("granularity", options.granularity ?? "day");
   if (options.presetId) params.set("preset_id", options.presetId);
+  // Bucket by the user's local day, not UTC (e.g. EST evening != next day).
+  const tzOffset =
+    typeof window !== "undefined" ? -new Date().getTimezoneOffset() : 0;
+  params.set("tz_offset", String(tzOffset));
   return analyticsFetch<AnalyticsReport>(`/api/analytics/report?${params.toString()}`);
 }
 

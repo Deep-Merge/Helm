@@ -6,6 +6,7 @@ import {
   isBidSubmitButton,
   readBidFormValues,
   scrapeProjectAsync,
+  scrapeClarificationBoardAsync,
   scrollToBidActions,
   scrollToProposalField,
   scrollToQuestionsField,
@@ -25,7 +26,7 @@ import {
   resolvePendingHandoffFast,
   type SubmittedBidSnapshot,
 } from "../lib/dashboard-handoff";
-import { generateBid, getProfile, getProjectStatusMap, getSettings, submitBid, ensureLocalDevSettings, verifyApiConnection, friendlyApiError } from "../lib/api";
+import { generateBid, getProfile, getProjectStatusMap, getSettings, submitBid, updateProjectClarifications, ensureLocalDevSettings, verifyApiConnection, friendlyApiError } from "../lib/api";
 import {
   findActionForEvent,
   readHotkeyBindings,
@@ -146,18 +147,17 @@ function toast(message: string, type: "success" | "error" = "success") {
   setTimeout(() => t.remove(), 3200);
 }
 
-const DASHBOARD_CONNECT_URL = "http://localhost:3000/connect-extension";
+const DASHBOARD_CONNECT_URL = "http://localhost:3001/connect-extension";
 const HELM_ICON_URL = chrome.runtime.getURL("icons/icon48.png");
 
 function buildPanel(): HTMLElement {
-  const root = el("div", "ba-panel");
+  const root = el("div", "ba-panel ba-panel--collapsed");
   root.innerHTML = `
     <header class="ba-panel__header">
       <div class="ba-panel__brand">
         <span class="ba-panel__logo"><img src="${HELM_ICON_URL}" alt="" width="36" height="36" /></span>
         <div>
           <div class="ba-panel__title">Helm</div>
-          <div class="ba-panel__subtitle">Freelancer workspace</div>
         </div>
       </div>
       <button class="ba-panel__close" type="button" aria-label="Close">×</button>
@@ -179,7 +179,6 @@ function buildPanel(): HTMLElement {
               <input class="ba-input" id="ba-timeline" type="number" min="1" step="1" placeholder="—" />
             </div>
           </div>
-          <p class="ba-field-hint">US senior engineer + AI estimates for Freelancer bid fields</p>
         </div>
 
         <div class="ba-feasibility ba-feasibility--hidden" id="ba-feasibility">
@@ -242,14 +241,18 @@ function wirePanelEvents() {
   makeDraggable(panelRoot);
 }
 
-async function initPanelFast() {
+async function initPanelFast(options: { expand?: boolean } = {}) {
   ensurePanelDirectionFromSettings();
   if (!panelRoot) {
     panelRoot = buildPanel();
     document.body.appendChild(panelRoot);
     wirePanelEvents();
   }
-  panelRoot.classList.remove("ba-panel--collapsed");
+  if (options.expand) {
+    panelRoot.classList.remove("ba-panel--collapsed");
+  } else {
+    panelRoot.classList.add("ba-panel--collapsed");
+  }
 }
 
 async function initPanel() {
@@ -481,7 +484,6 @@ function projectPageKey(): string {
 async function openPanelOnProjectPage() {
   if (!isProjectBidPage()) return;
   await initPanel();
-  panelRoot?.classList.remove("ba-panel--collapsed");
   await refreshSubmittedBidEstimates(lastScrapedSnapshot);
 }
 
@@ -529,7 +531,7 @@ async function tryDashboardSubmittedFill(): Promise<boolean> {
     lastScrapedSnapshot = handoffToScrapedProject(handoff);
     lastProjectId = handoffId;
 
-    await initPanelFast();
+    await initPanelFast({ expand: true });
     setLoading(false);
 
     applySubmittedBidToPanel(handoff.bid, handoffId, handoff.bid.bid_id);
@@ -570,7 +572,7 @@ async function tryDashboardHandoffGenerate() {
     lastScrapedSnapshot = scraped;
     lastProjectId = handoffId;
 
-    await initPanelFast();
+    await initPanelFast({ expand: true });
     setLoading(true);
     panelRoot?.querySelector("#ba-output")?.classList.add("ba-output--hidden");
     panelRoot?.querySelector("#ba-loading")?.classList.remove("ba-loading--hidden");
@@ -632,14 +634,11 @@ async function onProjectPageReady() {
   const filled = await tryDashboardSubmittedFill();
   if (filled) return;
   await tryDashboardHandoffGenerate();
-  if (!panelRoot) {
-    await openPanelOnProjectPage();
-  }
+  injectFab();
 }
 
 async function showPanelForSubmittedProject() {
   await initPanel();
-  panelRoot?.classList.remove("ba-panel--collapsed");
   await refreshSubmittedBidEstimates();
 }
 
@@ -849,15 +848,12 @@ function makeDraggable(panel: HTMLElement) {
 
 function injectFab() {
   if (!isProjectDetailPage()) return;
+  if (document.querySelector(".ba-fab")) return;
   const fab = el("button", "ba-fab");
   fab.type = "button";
   fab.setAttribute("aria-label", "Open Helm");
-  const icon = document.createElement("img");
-  icon.src = HELM_ICON_URL;
-  icon.alt = "";
-  icon.width = 52;
-  icon.height = 52;
-  fab.appendChild(icon);
+  const mark = el("span", "ba-fab__mark", "H");
+  fab.appendChild(mark);
   fab.addEventListener("click", async () => {
     await initPanel();
     panelRoot?.classList.remove("ba-panel--collapsed");
@@ -969,9 +965,43 @@ function attachPlaceBidWatcher() {
   document.addEventListener("submit", handlePlaceBidEvent, true);
 }
 
+function attachClarificationScrapeListener() {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== "SCRAPE_CLARIFICATIONS") return;
+
+    void (async () => {
+      try {
+        const projectId = extractProjectId();
+        const clarifications = await scrapeClarificationBoardAsync(projectId, {
+          expandDom: message.expandDom !== false,
+          preferDom: true,
+        });
+
+        if (message.helmProjectId) {
+          await updateProjectClarifications(message.helmProjectId, clarifications, true);
+        }
+
+        if (lastScrapedSnapshot) {
+          lastScrapedSnapshot = { ...lastScrapedSnapshot, clarifications };
+        }
+
+        sendResponse({ ok: true, clarifications, count: clarifications.length });
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Could not scrape clarification board",
+        });
+      }
+    })();
+
+    return true;
+  });
+}
+
 if (window.location.hostname.includes("freelancer.com")) {
   void ensureLocalDevSettings();
   attachPlaceBidWatcher();
+  attachClarificationScrapeListener();
   attachHotkeyListener();
   attachHandoffStorageListener();
   watchFreelancerProjectNavigation();

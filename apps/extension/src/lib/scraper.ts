@@ -1,5 +1,8 @@
 export type BudgetType = "fixed" | "hourly" | "unknown";
 
+/** Public Freelancer REST API — never attach the user's Freelancer login cookies. */
+const FL_PUBLIC_FETCH: RequestInit = { credentials: "omit" };
+
 export type ClientInfo = {
   client_location?: string | null;
   client_country?: string | null;
@@ -28,6 +31,10 @@ export type ClarificationEntry = {
   posted_at: string | null;
   text: string;
   is_employer_reply: boolean;
+  thread_id?: string | null;
+  parent_id?: string | null;
+  depth?: number;
+  sort_order?: number;
 };
 
 function extractProjectIdFromDom(): string | null {
@@ -219,7 +226,7 @@ function formatBudgetFromApi(project: Record<string, unknown>): string | null {
   const code = currency?.code ?? "";
   const min = budget.minimum ?? budget.maximum;
   const max = budget.maximum ?? budget.minimum;
-  const type = project.type === "hourly" ? " / hour" : "";
+  const type = project.type === "hourly" ? " per hour" : "";
   return `${sign}${min} – ${sign}${max} ${code}${type}`.trim();
 }
 
@@ -360,6 +367,7 @@ async function fetchOwnerFromFreelancerApi(
   try {
     const res = await fetch(
       `https://www.freelancer.com/api/users/0.1/users/?users[]=${id}&avatar=true&country_details=true&employer_reputation=true`,
+      FL_PUBLIC_FETCH,
     );
     if (!res.ok) return null;
     const data = (await res.json()) as { result?: { users?: Record<string, unknown>[] } };
@@ -563,7 +571,7 @@ async function fetchProjectFromFreelancerApi(
   if (!apiUrl) return null;
 
   try {
-    const res = await fetch(apiUrl);
+    const res = await fetch(apiUrl, FL_PUBLIC_FETCH);
     if (!res.ok) return null;
     const data = (await res.json()) as { result?: { projects?: Record<string, unknown>[] } };
     const project = data.result?.projects?.[0];
@@ -602,6 +610,13 @@ async function fetchProjectFromFreelancerApi(
   } catch {
     return null;
   }
+}
+
+export async function hydrateProjectFromFreelancerApi(
+  projectId?: string | null,
+  seoUrl?: string | null,
+): Promise<Partial<ScrapedProject> | null> {
+  return fetchProjectFromFreelancerApi(projectId, seoUrl);
 }
 
 export function scrapeProject(): ScrapedProject {
@@ -676,131 +691,667 @@ function findClarificationBoardRoot(): HTMLElement | null {
   return byAttr && !isExtensionElement(byAttr) ? byAttr : null;
 }
 
-function dedupeClarificationBlocks(blocks: HTMLElement[]): HTMLElement[] {
-  return blocks.filter((block, idx) => {
-    for (let j = 0; j < blocks.length; j += 1) {
-      if (idx !== j && blocks[j].contains(block)) return false;
+const CLARIFICATION_COMMENT_SELECTORS = [
+  "fl-project-comment",
+  "fl-comment",
+  '[class*="ProjectComment"]',
+  '[class*="project-comment"]',
+  '[class*="CommentItem"]',
+  '[class*="comment-item"]',
+  '[class*="Clarification"]',
+  '[class*="MessageRow"]',
+  '[class*="message-row"]',
+];
+
+function isNoiseClarificationLine(line: string): boolean {
+  const trimmed = line.trim();
+  return !trimmed || trimmed === "." || trimmed === "·" || trimmed === "…" || trimmed === "...";
+}
+
+const CLARIFICATION_TIME_RE =
+  /(\d+\s*(?:m|h|d|mo|yr|min|sec|hour|day|week|month|year)s?|less than\s+\d+\s*\w+)/i;
+
+function looksLikeAuthorName(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || /^client$/i.test(trimmed)) return true;
+  if (trimmed.length > 45) return false;
+  if (/^@\w+/.test(trimmed)) return false;
+  if (/^\d/.test(trimmed)) return false;
+  if (/[:;]/.test(trimmed)) return false;
+  if (
+    /^(I|That|Hello|Thanks|Thank|Good|Great|Agreed|The|For|We|You|A|An|My|Our|This|Those|These|Please|Yes|No|Also|So|But|And|Or|Would|Could|Should|Do|Does|Is|Are|Can|Will|Hi)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return false;
+  }
+  if (/[.!?]$/.test(trimmed)) return false;
+  if (trimmed.split(/\s+/).length > 5) return false;
+  return true;
+}
+
+type ParsedCommentMeta = {
+  author: string;
+  username: string | null;
+  posted_at: string | null;
+  is_employer_reply: boolean;
+  bodyStart: number;
+  inlineBody?: string;
+};
+
+function matchesCommentElement(el: HTMLElement): boolean {
+  return CLARIFICATION_COMMENT_SELECTORS.some((sel) => {
+    try {
+      return el.matches(sel);
+    } catch {
+      return false;
     }
-    return true;
   });
 }
 
-function parseCommentBlock(el: HTMLElement): ClarificationEntry | null {
-  const raw = el.innerText?.trim() || "";
-  if (raw.length < 20) return null;
-  if (/clarification\s+board|no spam|get verified|report project/i.test(raw) && raw.length < 120) {
-    return null;
+function threadElementKey(el: HTMLElement): string {
+  const parsed = parseCommentBlock(el)[0];
+  if (parsed) return parsed.id;
+  const sample = extractCommentBodyText(el).slice(0, 160);
+  let hash = 0;
+  for (let i = 0; i < sample.length; i += 1) {
+    hash = (hash * 31 + sample.charCodeAt(i)) >>> 0;
   }
+  return `cb-thread-${hash.toString(36)}`;
+}
 
-  const lines = raw
+function extractTime(text: string): string | null {
+  const m = CLARIFICATION_TIME_RE.exec(text);
+  return m?.[1] ?? null;
+}
+
+function splitCommentLines(text: string): string[] {
+  return text
     .split("\n")
     .map((line) => line.trim())
+    .filter((line) => !isNoiseClarificationLine(line));
+}
+
+function detectClientFromDom(el: HTMLElement): boolean {
+  if (el.querySelector('[class*="employer" i], [class*="owner" i], [class*="buyer" i]')) {
+    return true;
+  }
+  const head = splitCommentLines(el.innerText || "").slice(0, 3).join(" ");
+  return /^client\b/i.test(head) || /\bclient\s*[·\-–|]/i.test(head);
+}
+
+function extractFreelancerFromDom(el: HTMLElement): { author: string; username: string } | null {
+  const link = el.querySelector('a[href*="/u/"]');
+  if (!link) return null;
+
+  const href = link.getAttribute("href") || "";
+  const um = href.match(/\/u\/([^/?#]+)/i);
+  if (!um) return null;
+  const username = um[1];
+
+  const header =
+    link.closest(
+      '[class*="header" i], [class*="meta" i], [class*="author" i], fl-project-comment-header, header',
+    ) ?? link.parentElement;
+
+  const headerText = (header?.textContent ?? link.parentElement?.textContent ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const inlineName = headerText.match(
+    /([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,2})\s+@/,
+  );
+  if (inlineName?.[1]) {
+    return { author: inlineName[1].trim(), username };
+  }
+
+  const linkText = (link.textContent ?? "").replace(/^@/, "").trim();
+  if (linkText && linkText !== username && /[A-Z]/.test(linkText)) {
+    return { author: linkText, username };
+  }
+
+  return { author: username, username };
+}
+
+function extractCommentBodyText(el: HTMLElement): string {
+  const clone = el.cloneNode(true) as HTMLElement;
+
+  for (const sel of CLARIFICATION_COMMENT_SELECTORS) {
+    clone.querySelectorAll(sel).forEach((node) => {
+      if (node !== clone && clone.contains(node)) node.remove();
+    });
+  }
+
+  clone
+    .querySelectorAll(
+      '[class*="repl" i], [class*="nested" i], [class*="children" i], [class*="thread" i] ul, [class*="thread" i] ol',
+    )
+    .forEach((node) => {
+      if (node !== clone) node.remove();
+    });
+
+  return (clone.innerText || "").trim();
+}
+
+function countEmbeddedMessages(text: string): number {
+  const matches = text.match(
+    /(?:^|\n)(?:Client\s*[·\-–|]\s*\d|[A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2}\s+@[A-Za-z0-9_]+)/gi,
+  );
+  return matches?.length ?? 0;
+}
+
+function splitEmbeddedMessages(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed || countEmbeddedMessages(trimmed) <= 1) return [trimmed];
+
+  const parts = trimmed
+    .split(
+      /(?=(?:^|\n)(?:Client\s*[·\-–|]\s*\d|[A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2}\s+@[A-Za-z0-9_]+))/m,
+    )
+    .map((part) => part.trim())
     .filter(Boolean);
+
+  return parts.length > 1 ? parts : [trimmed];
+}
+
+function commentReplyDepth(el: HTMLElement, boardRoot: HTMLElement): number {
+  let depth = 0;
+  let parent = el.parentElement;
+  while (parent && parent !== boardRoot) {
+    const cls = parent.className?.toString() ?? "";
+    if (
+      /reply|nested|indent|child|subcomment|thread/i.test(cls) ||
+      parent.matches('[class*="reply" i], [class*="nested" i], [class*="indent" i]')
+    ) {
+      depth += 1;
+    }
+    parent = parent.parentElement;
+  }
+  return depth;
+}
+
+function findAllCommentLeaves(boardRoot: HTMLElement): HTMLElement[] {
+  const all: HTMLElement[] = [];
+
+  for (const sel of CLARIFICATION_COMMENT_SELECTORS) {
+    boardRoot.querySelectorAll(sel).forEach((el) => {
+      if (el instanceof HTMLElement && !isExtensionElement(el) && isVisible(el)) {
+        all.push(el);
+      }
+    });
+  }
+
+  if (!all.length) {
+    return findCommentElementsFallback(boardRoot);
+  }
+
+  return sortElementsDocumentOrder(
+    all.filter((el) => !all.some((other) => other !== el && el.contains(other))),
+  );
+}
+
+function findCommentBlockForLink(link: HTMLAnchorElement, boardRoot: HTMLElement): HTMLElement | null {
+  let node: HTMLElement | null = link;
+  let best: HTMLElement | null = null;
+
+  while (node && boardRoot.contains(node)) {
+    if (matchesCommentElement(node)) best = node;
+
+    const text = node.innerText || "";
+    if (countEmbeddedMessages(text) > 1 && best) break;
+
+    node = node.parentElement;
+  }
+
+  return best ?? link.closest("div, li, article") ?? link.parentElement;
+}
+
+function findCommentElementsFallback(boardRoot: HTMLElement): HTMLElement[] {
+  const blocks = new Set<HTMLElement>();
+
+  boardRoot.querySelectorAll('a[href*="/u/"]').forEach((link) => {
+    if (!(link instanceof HTMLAnchorElement) || isExtensionElement(link)) return;
+    const block = findCommentBlockForLink(link, boardRoot);
+    if (block && boardRoot.contains(block) && !isExtensionElement(block) && isVisible(block)) {
+      blocks.add(block);
+    }
+  });
+
+  boardRoot.querySelectorAll("div, fl-project-comment, fl-comment, li").forEach((el) => {
+    if (!(el instanceof HTMLElement) || isExtensionElement(el) || !isVisible(el)) return;
+    const text = (el.innerText || "").trim();
+    if (/^client\s*[·\-–|]/i.test(text) && text.length < 4000 && countEmbeddedMessages(text) <= 1) {
+      blocks.add(el);
+    }
+  });
+
+  return sortElementsDocumentOrder(
+    [...blocks].filter(
+      (block) => ![...blocks].some((other) => other !== block && block.contains(other)),
+    ),
+  );
+}
+
+function parseCommentHeader(lines: string[]): ParsedCommentMeta | null {
   if (!lines.length) return null;
+
+  const line0 = lines[0];
+
+  if (/^client$/i.test(line0) && lines[1] && CLARIFICATION_TIME_RE.test(lines[1])) {
+    return {
+      author: "Client",
+      username: null,
+      posted_at: extractTime(lines[1]),
+      is_employer_reply: true,
+      bodyStart: 2,
+    };
+  }
+
+  const clientInline = line0.match(/^client\s*[·\-–|]\s*(.+)$/i);
+  if (clientInline) {
+    const tail = clientInline[1].trim();
+    const postedAt = extractTime(tail);
+    const inlineBody = tail.replace(CLARIFICATION_TIME_RE, "").trim();
+    return {
+      author: "Client",
+      username: null,
+      posted_at: postedAt,
+      is_employer_reply: true,
+      bodyStart: inlineBody.length >= 8 ? 0 : 1,
+      inlineBody: inlineBody.length >= 8 ? inlineBody : undefined,
+    };
+  }
+
+  const userTimeBody = line0.match(
+    /^(.+?)\s+@([A-Za-z0-9_]+)\s*(?:[·\-–|]\s*)?(.+?)\s+(.+)$/,
+  );
+  if (userTimeBody && CLARIFICATION_TIME_RE.test(userTimeBody[3])) {
+    return {
+      author: userTimeBody[1].trim(),
+      username: userTimeBody[2],
+      posted_at: extractTime(userTimeBody[3]),
+      is_employer_reply: false,
+      bodyStart: 0,
+      inlineBody: userTimeBody[4].trim(),
+    };
+  }
+
+  const userTime = line0.match(/^(.+?)\s+@([A-Za-z0-9_]+)\s*(?:[·\-–|]\s*)?(.+)$/);
+  if (userTime) {
+    const tail = userTime[3].trim();
+    const postedAt = extractTime(tail);
+    if (postedAt) {
+      const inlineBody = tail.replace(CLARIFICATION_TIME_RE, "").trim();
+      return {
+        author: userTime[1].trim(),
+        username: userTime[2],
+        posted_at: postedAt,
+        is_employer_reply: false,
+        bodyStart: inlineBody.length >= 4 ? 0 : 1,
+        inlineBody: inlineBody.length >= 4 ? inlineBody : undefined,
+      };
+    }
+  }
 
   let author = "";
   let username: string | null = null;
   let postedAt: string | null = null;
   let bodyStart = 0;
+  let inlineBody: string | undefined;
 
   for (let i = 0; i < Math.min(lines.length, 6); i += 1) {
     const line = lines[i];
-    const userMatch = line.match(/^@([A-Za-z0-9_]+)$/);
-    if (userMatch) {
-      username = userMatch[1];
+
+    if (/^client$/i.test(line)) {
+      author = "Client";
       continue;
     }
-    if (/^\d+\s*(m|h|d|mo|yr|min|sec|hour|day|week|month|year)s?\b/i.test(line) || /^less than/i.test(line)) {
-      postedAt = line;
+
+    const userOnly = line.match(/^@([A-Za-z0-9_]+)$/);
+    if (userOnly) {
+      username = userOnly[1];
+      continue;
+    }
+
+    const inlineUser = line.match(/^(.+?)\s+@([A-Za-z0-9_]+)$/);
+    if (inlineUser && looksLikeAuthorName(inlineUser[1])) {
+      author = inlineUser[1].trim();
+      username = inlineUser[2];
+      continue;
+    }
+
+    if (CLARIFICATION_TIME_RE.test(line) && /^(less than|\d)/i.test(line)) {
+      postedAt = extractTime(line);
+      const afterTime = line.replace(CLARIFICATION_TIME_RE, "").trim();
+      if (afterTime.length >= 4) {
+        inlineBody = afterTime;
+      }
       bodyStart = i + 1;
       break;
     }
-    if (!author && line.length <= 60 && !/[.!?]$/.test(line)) {
+
+    if (!author && looksLikeAuthorName(line)) {
       author = line;
+      continue;
     }
+
+    break;
   }
 
-  if (!postedAt) {
-    for (let i = 0; i < Math.min(lines.length, 4); i += 1) {
-      if (/^\d+\s*(m|h|d|mo|yr|min|sec)s?\b/i.test(lines[i])) {
-        postedAt = lines[i];
-        bodyStart = i + 1;
-        break;
-      }
-    }
-  }
+  if (!author && !username) return null;
 
-  const text = lines.slice(bodyStart).join("\n").trim();
-  if (text.length < 15) return null;
-
-  const authorFromUser = username || author || "Unknown";
-  const isEmployerReply =
-    /employer|client|project owner|buyer/i.test(authorFromUser) ||
-    !!el.querySelector('[class*="employer" i], [class*="owner" i], [class*="buyer" i]');
-
-  const entry = {
-    author: author || authorFromUser,
+  return {
+    author: author || (username ?? "Freelancer"),
     username,
     posted_at: postedAt,
-    text,
-    is_employer_reply: isEmployerReply,
+    is_employer_reply: /^client$/i.test(author),
+    bodyStart,
+    inlineBody,
   };
-
-  return { id: clarificationEntryId(entry), ...entry };
 }
 
-function findCommentBlocks(root: HTMLElement): HTMLElement[] {
-  const selectors = [
-    "fl-project-comment",
-    "fl-comment",
-    '[class*="ProjectComment"]',
-    '[class*="project-comment"]',
-    '[class*="CommentItem"]',
-    '[class*="comment-item"]',
-    '[class*="Clarification"]',
-    '[class*="MessageRow"]',
-    '[class*="message-row"]',
-    "li",
-    "article",
-  ];
+function stripMetaPrefixFromBody(text: string): string {
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/^client\s*(?:[·\-–|]\s*)?\d+\s*\w?\s*/i, "");
+  cleaned = cleaned.replace(
+    /^[A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2}\s+@[A-Za-z0-9_]+\s*(?:[·\-–|]\s*)?\d+\s*\w?\s*/i,
+    "",
+  );
+  return cleaned.trim();
+}
 
-  const blocks: HTMLElement[] = [];
-  for (const sel of selectors) {
-    root.querySelectorAll(sel).forEach((el) => {
-      if (!(el instanceof HTMLElement) || isExtensionElement(el)) return;
-      if (!isVisible(el)) return;
-      const parsed = parseCommentBlock(el);
-      if (parsed) blocks.push(el);
-    });
-    if (blocks.length >= 2) break;
+function buildCommentBody(meta: ParsedCommentMeta, lines: string[]): string {
+  const inline = meta.inlineBody?.trim() ?? "";
+  const tailLines =
+    meta.bodyStart === 0 && inline ? lines.slice(1) : lines.slice(meta.bodyStart);
+  const tail = tailLines
+    .join("\n")
+    .trim()
+    .replace(/\s+…?\s*more\s*$/i, "");
+
+  let text = inline;
+  if (tail) {
+    if (!text) {
+      text = tail;
+    } else if (tail === text || tail.startsWith(text)) {
+      text = tail;
+    } else if (!text.includes(tail.split("\n")[0] ?? tail)) {
+      text = `${text}\n\n${tail}`;
+    }
   }
 
-  if (blocks.length < 2) {
-    root.querySelectorAll("div").forEach((el) => {
-      if (isExtensionElement(el)) return;
-      const text = el.innerText?.trim() || "";
-      if (text.length < 40 || text.length > 4000) return;
-      if (!/@\w/.test(text)) return;
-      if (el.querySelectorAll("div").length > 12) return;
-      if (parseCommentBlock(el)) blocks.push(el);
+  return stripMetaPrefixFromBody(text.trim());
+}
+
+const FREELANCER_META_RE =
+  /^([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2})\s+@([A-Za-z0-9_]+)\s*(?:[·\-–|]\s*)?(\d+\s*\w?|less than\s+\d+\s*\w+)?\s*(.*)$/s;
+
+const CLIENT_META_RE =
+  /^client\s*(?:[·\-–|]\s*)?(\d+\s*\w?|less than\s+\d+\s*\w+)?\s*(.*)$/is;
+
+function parseMetaFromText(text: string): {
+  author: string;
+  username: string | null;
+  posted_at: string | null;
+  is_employer_reply: boolean;
+  body: string;
+} | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const clientMatch = trimmed.match(CLIENT_META_RE);
+  if (clientMatch) {
+    const body = (clientMatch[2] ?? "").trim();
+    if (!body) return null;
+    return {
+      author: "Client",
+      username: null,
+      posted_at: clientMatch[1]?.trim() || null,
+      is_employer_reply: true,
+      body,
+    };
+  }
+
+  const freelancerMatch = trimmed.match(FREELANCER_META_RE);
+  if (freelancerMatch) {
+    const body = (freelancerMatch[4] ?? "").trim();
+    if (!body) return null;
+    return {
+      author: freelancerMatch[1].trim(),
+      username: freelancerMatch[2],
+      posted_at: freelancerMatch[3]?.trim() || null,
+      is_employer_reply: false,
+      body,
+    };
+  }
+
+  return null;
+}
+
+function needsClarificationRepair(entry: Omit<ClarificationEntry, "id">): boolean {
+  const text = entry.text.trim();
+  if (!text) return false;
+  if (!entry.author || /^unknown$/i.test(entry.author)) return true;
+  if (entry.username && entry.author.toLowerCase() === entry.username.toLowerCase()) return true;
+  if (entry.author === "Freelancer" && /@/.test(text)) return true;
+  if (/^(client\s*[·\-–|]|[A-Za-z][A-Za-z.'-]+\s+@)/i.test(text)) return true;
+  if (countEmbeddedMessages(text) > 1) return true;
+  return false;
+}
+
+function normalizeClarificationEntry(entry: ClarificationEntry): ClarificationEntry {
+  if (needsClarificationRepair(entry)) {
+    const parsed = parseMetaFromText(entry.text);
+    if (parsed) {
+      const fixed = {
+        author: parsed.author,
+        username: parsed.is_employer_reply ? null : parsed.username,
+        posted_at: parsed.posted_at ?? entry.posted_at,
+        text: parsed.body,
+        is_employer_reply: parsed.is_employer_reply,
+      };
+      return { id: clarificationEntryId(fixed), ...fixed, thread_id: entry.thread_id, parent_id: entry.parent_id, depth: entry.depth };
+    }
+  }
+
+  const stripped = stripMetaPrefixFromBody(entry.text);
+  if (stripped && stripped !== entry.text.trim()) {
+    const fixed = { ...entry, text: stripped };
+    return { ...fixed, id: clarificationEntryId(fixed) };
+  }
+
+  if (/^client$/i.test(entry.author) || entry.is_employer_reply) {
+    return { ...entry, author: "Client", username: null, is_employer_reply: true };
+  }
+
+  return entry;
+}
+
+function sortElementsDocumentOrder(elements: HTMLElement[]): HTMLElement[] {
+  return [...elements].sort((a, b) => {
+    const pos = a.compareDocumentPosition(b);
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+    if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+    return 0;
+  });
+}
+
+function metaFromParsedText(
+  chunk: string,
+): ParsedCommentMeta | null {
+  const parsed = parseMetaFromText(chunk);
+  if (!parsed) return null;
+  return {
+    author: parsed.author,
+    username: parsed.username,
+    posted_at: parsed.posted_at,
+    is_employer_reply: parsed.is_employer_reply,
+    bodyStart: 0,
+    inlineBody: parsed.body,
+  };
+}
+
+function parseCommentBlock(el: HTMLElement): ClarificationEntry[] {
+  const fullText = extractCommentBodyText(el);
+  if (fullText.length < 4) return [];
+  if (/clarification\s+board|no spam|get verified|report project/i.test(fullText) && fullText.length < 120) {
+    return [];
+  }
+
+  const isClient = detectClientFromDom(el);
+  const chunks = splitEmbeddedMessages(fullText);
+  const results: ClarificationEntry[] = [];
+
+  for (const chunk of chunks) {
+    const lines = splitCommentLines(chunk);
+    if (!lines.length) continue;
+
+    let meta = parseCommentHeader(lines);
+    const domFreelancer = !isClient && !meta?.is_employer_reply ? extractFreelancerFromDom(el) : null;
+
+    if (!meta && /^client\s*[·\-–|]/i.test(chunk)) {
+      meta = metaFromParsedText(chunk);
+    }
+
+    if (!meta && isClient) {
+      meta = {
+        author: "Client",
+        username: null,
+        posted_at: extractTime(chunk) ?? extractTime(lines[0] ?? ""),
+        is_employer_reply: true,
+        bodyStart: 0,
+      };
+    }
+
+    if (!meta && domFreelancer) {
+      meta = {
+        author: domFreelancer.author,
+        username: domFreelancer.username,
+        posted_at: extractTime(chunk),
+        is_employer_reply: false,
+        bodyStart: 0,
+      };
+    }
+
+    if (!meta) continue;
+
+    if (isClient || meta.is_employer_reply || /^client/i.test(meta.author)) {
+      meta.author = "Client";
+      meta.username = null;
+      meta.is_employer_reply = true;
+    } else if (domFreelancer) {
+      meta.author = domFreelancer.author;
+      meta.username = domFreelancer.username;
+      meta.is_employer_reply = false;
+    }
+
+    let text = buildCommentBody(meta, lines);
+
+    if (text.length < 1) continue;
+
+    const entry = {
+      author: meta.is_employer_reply ? "Client" : meta.author,
+      username: meta.is_employer_reply ? null : meta.username,
+      posted_at: meta.posted_at,
+      text,
+      is_employer_reply: meta.is_employer_reply,
+    };
+
+    results.push({ id: clarificationEntryId(entry), ...entry });
+  }
+
+  return results;
+}
+
+function findTopLevelCommentRoots(boardRoot: HTMLElement): HTMLElement[] {
+  const all = new Set<HTMLElement>();
+  for (const sel of CLARIFICATION_COMMENT_SELECTORS) {
+    boardRoot.querySelectorAll(sel).forEach((el) => {
+      if (el instanceof HTMLElement && !isExtensionElement(el) && isVisible(el)) {
+        all.add(el);
+      }
     });
   }
 
-  return dedupeClarificationBlocks(blocks);
+  if (!all.size) {
+    return findCommentElementsFallback(boardRoot);
+  }
+
+  return sortElementsDocumentOrder(
+    [...all].filter((el) => {
+      let parent = el.parentElement;
+      while (parent && parent !== boardRoot) {
+        if (matchesCommentElement(parent)) return false;
+        parent = parent.parentElement;
+      }
+      return true;
+    }),
+  );
+}
+
+function collectThreadMessages(threadRoot: HTMLElement): HTMLElement[] {
+  const nested: HTMLElement[] = [];
+  for (const sel of CLARIFICATION_COMMENT_SELECTORS) {
+    threadRoot.querySelectorAll(sel).forEach((el) => {
+      if (
+        el instanceof HTMLElement &&
+        el !== threadRoot &&
+        !isExtensionElement(el) &&
+        isVisible(el)
+      ) {
+        nested.push(el);
+      }
+    });
+  }
+
+  const replies = sortElementsDocumentOrder(
+    nested.filter((node) => !nested.some((other) => other !== node && node.contains(other))),
+  );
+
+  // Thread root holds the freelancer's opening question; leaf-only filter was dropping it.
+  const rootText = extractCommentBodyText(threadRoot);
+  if (rootText.length >= 4) {
+    return sortElementsDocumentOrder([threadRoot, ...replies]);
+  }
+
+  return replies;
 }
 
 function scrapeClarificationBoardFromDom(): ClarificationEntry[] {
   const root = findClarificationBoardRoot();
   if (!root) return [];
 
+  const threadRoots = sortElementsDocumentOrder(findTopLevelCommentRoots(root));
   const entries: ClarificationEntry[] = [];
-  const seen = new Set<string>();
+  const seenIds = new Set<string>();
+  let sortOrder = 0;
+  let currentThreadId: string | null = null;
 
-  for (const block of findCommentBlocks(root)) {
-    const entry = parseCommentBlock(block);
-    if (!entry || seen.has(entry.id)) continue;
-    seen.add(entry.id);
-    entries.push(entry);
+  for (const threadRoot of threadRoots) {
+    const isClientRoot = detectClientFromDom(threadRoot);
+
+    if (!isClientRoot || !currentThreadId) {
+      currentThreadId = threadElementKey(threadRoot);
+    }
+
+    const messages = collectThreadMessages(threadRoot);
+
+    messages.forEach((el, depth) => {
+      for (const parsed of parseCommentBlock(el)) {
+        const normalized = normalizeClarificationEntry(parsed);
+        if (seenIds.has(normalized.id)) continue;
+        seenIds.add(normalized.id);
+
+        entries.push({
+          ...normalized,
+          thread_id: currentThreadId,
+          parent_id: depth > 0 ? currentThreadId : null,
+          depth,
+          sort_order: sortOrder,
+        });
+        sortOrder += 1;
+      }
+    });
   }
 
   return entries;
@@ -819,7 +1370,7 @@ function normalizeApiClarification(raw: Record<string, unknown>): ClarificationE
     (typeof raw.author_name === "string" && raw.author_name) ||
     (typeof raw.display_name === "string" && raw.display_name) ||
     (typeof raw.username === "string" && raw.username) ||
-    "Unknown";
+    "Freelancer";
   const username =
     (typeof raw.username === "string" && raw.username) ||
     (typeof raw.author_username === "string" && raw.author_username) ||
@@ -831,12 +1382,14 @@ function normalizeApiClarification(raw: Record<string, unknown>): ClarificationE
     (typeof raw.time_submitted === "number" && new Date(raw.time_submitted * 1000).toISOString()) ||
     null;
 
+  const isEmployer = Boolean(raw.is_employer || raw.is_owner || raw.from_owner);
+
   const entry = {
-    author,
-    username,
+    author: isEmployer ? "Client" : author,
+    username: isEmployer ? null : username,
     posted_at: postedAt,
     text: text.trim(),
-    is_employer_reply: Boolean(raw.is_employer || raw.is_owner || raw.from_owner),
+    is_employer_reply: isEmployer,
   };
   return { id: clarificationEntryId(entry), ...entry };
 }
@@ -852,7 +1405,7 @@ async function fetchClarificationBoardFromApi(projectId: string): Promise<Clarif
 
   for (const url of urls) {
     try {
-      const res = await fetch(url, { credentials: "include" });
+      const res = await fetch(url, FL_PUBLIC_FETCH);
       if (!res.ok) continue;
       const data = (await res.json()) as { result?: Record<string, unknown> };
       const result = data.result || {};
@@ -872,9 +1425,73 @@ async function fetchClarificationBoardFromApi(projectId: string): Promise<Clarif
   return [];
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function isClarificationExpandControl(el: Element): boolean {
+  if (isExtensionElement(el)) return false;
+  if (!(el instanceof HTMLElement)) return false;
+  const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+  if (!text) return false;
+  if (/^view\s+\d+\s+more\s+questions?$/i.test(text)) return true;
+  if (/^view\s+more\s+questions?$/i.test(text)) return true;
+  if (/^more$/i.test(text)) return true;
+  return false;
+}
+
+async function clickClarificationExpandControls(root: HTMLElement): Promise<number> {
+  const controls = Array.from(
+    root.querySelectorAll('a, button, span, fl-link, fl-button, [role="button"]'),
+  ).filter(isClarificationExpandControl) as HTMLElement[];
+
+  let clicked = 0;
+  for (const control of controls) {
+    if (!isVisible(control)) continue;
+    control.click();
+    clicked += 1;
+    await sleep(180);
+  }
+  return clicked;
+}
+
+export async function expandClarificationBoardDom(maxRounds = 20): Promise<void> {
+  for (let round = 0; round < maxRounds; round += 1) {
+    const root = findClarificationBoardRoot();
+    if (!root) return;
+
+    root.scrollIntoView({ block: "nearest" });
+    await sleep(120);
+
+    const clicked = await clickClarificationExpandControls(root);
+    if (clicked === 0) break;
+    await sleep(350);
+  }
+}
+
+export type ScrapeClarificationOptions = {
+  expandDom?: boolean;
+  preferDom?: boolean;
+};
+
 export async function scrapeClarificationBoardAsync(
   projectId?: string | null,
+  options?: ScrapeClarificationOptions,
 ): Promise<ClarificationEntry[]> {
+  if (options?.expandDom) {
+    await expandClarificationBoardDom();
+  }
+
+  const domEntries = scrapeClarificationBoardFromDom();
+  if (options?.preferDom) {
+    return domEntries;
+  }
+  if (options?.expandDom && domEntries.length) {
+    return domEntries;
+  }
+
   const numericId =
     projectId && /^\d+$/.test(projectId) ? projectId : extractProjectIdFromDom();
 
@@ -883,43 +1500,63 @@ export async function scrapeClarificationBoardAsync(
     if (fromApi.length) return fromApi;
   }
 
-  return scrapeClarificationBoardFromDom();
+  return domEntries;
 }
 
 export async function scrapeProjectAsync(cached?: Partial<ScrapedProject>): Promise<ScrapedProject> {
-  const dom = scrapeProject();
-  let result: ScrapedProject = { ...dom };
-
+  const idFromPage = extractProjectId();
   const numericId =
     extractProjectIdFromDom() ||
-    (/^\d+$/.test(dom.freelancer_project_id) ? dom.freelancer_project_id : null);
+    (idFromPage && /^\d+$/.test(idFromPage) ? idFromPage : null);
   const seoUrl = extractSeoUrl();
+
+  // Prefer public REST API (session-independent). DOM is fallback only.
   const apiData = await fetchProjectFromFreelancerApi(numericId, seoUrl);
 
-  if (apiData) {
+  let result: ScrapedProject;
+
+  if (apiData?.freelancer_project_id) {
     result = {
-      ...result,
-      freelancer_project_id: apiData.freelancer_project_id || result.freelancer_project_id,
-      title: apiData.title || result.title,
-      description: apiData.description || result.description,
-      budget_text: apiData.budget_text || result.budget_text,
-      budget_type: apiData.budget_type || result.budget_type,
-      budget_min: apiData.budget_min ?? result.budget_min,
-      budget_max: apiData.budget_max ?? result.budget_max,
-      skills: apiData.skills?.length ? apiData.skills : result.skills,
-      url: apiData.url || result.url,
-      ...mergeClientInfo(apiData, cached, result),
+      freelancer_project_id: apiData.freelancer_project_id,
+      url: apiData.url || window.location.href.split("/details")[0] || window.location.href,
+      title: apiData.title || "Untitled Project",
+      description: (apiData.description || "").trim(),
+      budget_text: apiData.budget_text ?? null,
+      budget_type: apiData.budget_type || "unknown",
+      budget_min: apiData.budget_min,
+      budget_max: apiData.budget_max,
+      skills: apiData.skills?.length ? apiData.skills : [],
+      clarifications: [],
+      ...mergeClientInfo(apiData, cached),
     };
+
+    const needsDomFallback =
+      !result.description ||
+      result.description.length < 50 ||
+      !result.skills.length ||
+      !result.budget_text ||
+      result.client_rating == null;
+
+    if (needsDomFallback) {
+      const dom = scrapeProject();
+      if (!result.description || result.description.length < 50) {
+        result.description = dom.description || result.description;
+      }
+      if (!result.title || result.title === "Untitled Project") result.title = dom.title;
+      if (!result.skills.length) result.skills = dom.skills;
+      if (!result.budget_text) {
+        result.budget_text = dom.budget_text;
+        result.budget_type = dom.budget_type;
+      }
+      Object.assign(result, mergeClientInfo(result, dom));
+    }
   } else {
-    result = { ...result, ...mergeClientInfo(result, cached) };
+    const dom = scrapeProject();
+    result = { ...dom, ...mergeClientInfo(dom, cached) };
   }
 
   if ((!result.description || result.description.length < 50) && cached?.description?.trim()) {
     result.description = cached.description.trim();
-  }
-
-  if (!result.description || result.description.length < 50) {
-    result.description = dom.description;
   }
 
   const clarifications = await scrapeClarificationBoardAsync(result.freelancer_project_id);
@@ -927,8 +1564,6 @@ export async function scrapeProjectAsync(cached?: Partial<ScrapedProject>): Prom
     result.clarifications = clarifications;
   } else if (cached?.clarifications?.length) {
     result.clarifications = cached.clarifications;
-  } else {
-    result.clarifications = dom.clarifications;
   }
 
   return result;

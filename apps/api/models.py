@@ -53,6 +53,11 @@ class StatusUpdateRequest(BaseModel):
     status: Literal["viewed", "drafted", "submitted", "ignored", "won", "lost"]
 
 
+class ClarificationsUpdateRequest(BaseModel):
+    clarifications: list[dict] = Field(default_factory=list)
+    replace: bool = True
+
+
 class LocalRegisterRequest(BaseModel):
     email: str
     password: str
@@ -119,6 +124,8 @@ class ProfileUpdateRequest(BaseModel):
     proposal_style: str | None = None
     default_direction: str | None = None
     default_model_tier: Literal["auto", "standard", "premium"] | None = None
+    question_count: int | None = Field(default=None, ge=2, le=3)
+    proposal_model: str | None = None
 
 
 class WatcherConfigCreate(BaseModel):
@@ -164,6 +171,8 @@ class SavedFilterCreate(BaseModel):
     skills: list[str] = Field(default_factory=list)
     min_budget: float | None = None
     max_budget: float | None = None
+    min_hourly: float | None = None
+    max_hourly: float | None = None
     budget_type: Literal["fixed", "hourly", "any"] = "any"
     exclude_submitted: bool = False
     days: int | None = None
@@ -176,6 +185,8 @@ class SavedFilterUpdate(BaseModel):
     skills: list[str] | None = None
     min_budget: float | None = None
     max_budget: float | None = None
+    min_hourly: float | None = None
+    max_hourly: float | None = None
     budget_type: Literal["fixed", "hourly", "any"] | None = None
     exclude_submitted: bool | None = None
     days: int | None = None

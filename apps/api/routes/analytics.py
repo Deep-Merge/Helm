@@ -39,6 +39,7 @@ async def analytics_report(
     days: int = Query(7, ge=7, le=365),
     granularity: str = Query("day", pattern="^(day|week|month)$"),
     preset_id: str | None = Query(None),
+    tz_offset: int = Query(0, ge=-1440, le=1440),
     auth: AuthContext = Depends(get_auth),
 ):
     return store.get_analytics_report(
@@ -46,6 +47,7 @@ async def analytics_report(
         days=days,
         granularity=granularity,
         preset_id=preset_id,
+        tz_offset_minutes=tz_offset,
         persistent=auth.persistent,
     )
 
@@ -54,11 +56,13 @@ async def analytics_report(
 async def analytics_timeline(
     days: int = Query(7, ge=7, le=365),
     granularity: str = Query("day", pattern="^(day|week|month)$"),
+    tz_offset: int = Query(0, ge=-1440, le=1440),
     auth: AuthContext = Depends(get_auth),
 ):
     return store.get_analytics_timeline(
         auth.user_id,
         days=days,
         granularity=granularity,
+        tz_offset_minutes=tz_offset,
         persistent=auth.persistent,
     )

@@ -23,10 +23,11 @@ def _format_budget(project: dict[str, Any]) -> str | None:
     currency = project.get("currency") or {}
     sign = currency.get("sign") or "$"
     code = currency.get("code") or "USD"
+    hourly_suffix = " per hour" if project.get("type") == "hourly" else ""
     if minimum is not None and maximum is not None:
-        return f"{sign}{minimum:,.0f} – {sign}{maximum:,.0f} {code}"
+        return f"{sign}{minimum:,.0f} – {sign}{maximum:,.0f} {code}{hourly_suffix}"
     value = minimum if minimum is not None else maximum
-    return f"{sign}{value:,.0f} {code}"
+    return f"{sign}{value:,.0f} {code}{hourly_suffix}"
 
 
 def _project_url(project: dict[str, Any]) -> str:
@@ -74,11 +75,10 @@ def map_freelancer_project(project: dict[str, Any]) -> dict[str, Any]:
     budget = project.get("budget") or {}
     currency = project.get("currency") or {}
     bid_stats = project.get("bid_stats") or {}
-    exchange = float(currency.get("exchange_rate") or 1.0)
     minimum = budget.get("minimum")
     maximum = budget.get("maximum")
-    budget_min = float(minimum) * exchange if minimum is not None else None
-    budget_max = float(maximum) * exchange if maximum is not None else None
+    budget_min = round(float(minimum)) if minimum is not None else None
+    budget_max = round(float(maximum)) if maximum is not None else None
     jobs = project.get("jobs") or []
     skills = [j["name"] for j in jobs if isinstance(j, dict) and j.get("name")]
     submitted = project.get("time_submitted")
@@ -159,6 +159,40 @@ async def fetch_freelancer_projects(
         return []
     projects = (payload.get("result") or {}).get("projects") or []
     return [map_freelancer_project(p) for p in projects if isinstance(p, dict) and p.get("id")]
+
+
+async def fetch_freelancer_projects_by_ids(project_ids: list[str]) -> dict[str, dict[str, Any]]:
+    normalized_ids = [str(pid).strip() for pid in project_ids if str(pid).strip()]
+    unique_ids = list(dict.fromkeys(normalized_ids))
+    if not unique_ids:
+        return {}
+
+    params: list[tuple[str, str]] = [
+        ("full_description", "true"),
+        ("job_details", "true"),
+        ("owner_info", "true"),
+        ("location_details", "true"),
+    ]
+    for pid in unique_ids:
+        params.append(("projects[]", pid))
+
+    url = f"https://www.freelancer.com/api/projects/0.1/projects/?{urlencode(params)}"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        res = await client.get(url)
+        res.raise_for_status()
+        payload = res.json()
+
+    if payload.get("status") != "success":
+        return {}
+
+    projects = (payload.get("result") or {}).get("projects") or []
+    mapped: dict[str, dict[str, Any]] = {}
+    for project in projects:
+        if not isinstance(project, dict) or not project.get("id"):
+            continue
+        item = map_freelancer_project(project)
+        mapped[str(item["freelancer_project_id"])] = item
+    return mapped
 
 
 def _sort_batch_newest_first(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:

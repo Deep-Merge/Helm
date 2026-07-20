@@ -12,6 +12,7 @@ const nav = [
   { href: "/find", label: "Find projects", icon: "⌕", badge: true },
   { href: "/analytics", label: "Analytics", icon: "◫" },
   { href: "/connect-extension", label: "Connect extension", icon: "⎘" },
+  { href: "/settings", label: "Settings", icon: "⚙" },
 ];
 
 export function Sidebar() {
@@ -71,17 +72,6 @@ export function Sidebar() {
 
       <div className="space-y-1 border-t border-[var(--border)] p-3">
         <SidebarUser />
-        <Link
-          href="/settings"
-          className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${
-            pathname === "/settings"
-              ? "bg-[var(--accent-soft)] text-indigo-300"
-              : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
-          }`}
-        >
-          <span className="text-base opacity-80">⚙</span>
-          Settings
-        </Link>
         <a
           href={`${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}/export/csv`}
           className="block rounded-xl py-2 text-center text-xs text-zinc-500 hover:text-zinc-300"
