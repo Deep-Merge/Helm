@@ -9,7 +9,24 @@ Freelancer workspace — Chrome extension + API + dashboard.
 - **Next.js Dashboard** — auth, projects, proposals, analytics, settings
 - **Supabase** — PostgreSQL for projects, bids, profiles (optional in dev)
 
-## Quick start
+## Install on a new Windows PC (one click)
+
+1. Copy or `git clone` this project to the new PC (for example `C:\Helm`). Don't copy `node_modules`, `.next` or `.venv`; they are rebuilt.
+2. Double-click **`INSTALL-HELM.bat`** and approve the Administrator prompt.
+3. Answer the questions: a PostgreSQL password, your Helm login email and password, and your OpenAI key (optional).
+   After that, setup runs by itself (10–20 minutes). It:
+   - installs Python 3.12, Node.js LTS, PostgreSQL and Chrome
+   - creates the `bidautomation` database and writes both `.env` files
+   - builds the dashboard and the extension
+   - registers the **Helm Auto Start** task, which starts Helm 20 s after every sign-in and restarts it if it crashes
+4. Load the extension in Chrome: open `chrome://extensions`, turn on Developer mode, click **Load unpacked**, and choose `apps\extension\dist`.
+   Then open **Connect extension** in the dashboard.
+
+Desktop shortcuts: **Helm Dashboard**, **Start Helm**, **Stop Helm**.
+Logs are in `%ProgramData%\Helm\logs`.
+Re-run `INSTALL-HELM.bat` after pulling updates; it keeps your settings and rebuilds.
+
+## Quick start (development)
 
 ### 1. Backend
 

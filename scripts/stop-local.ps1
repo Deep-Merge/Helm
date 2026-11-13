@@ -11,7 +11,8 @@ function Stop-Port([int]$Port) {
 
 if (Test-Path $pidFile) {
     $state = Get-Content $pidFile -Raw | ConvertFrom-Json
-    foreach ($name in @("api_pid", "dashboard_pid")) {
+    # Stop the supervisor first so it does not restart what we stop below.
+    foreach ($name in @("supervisor_pid", "api_pid", "dashboard_pid")) {
         $id = $state.$name
         if ($id) {
             Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
