@@ -263,15 +263,12 @@ export default function SettingsPage() {
               <p className="mt-1 text-sm text-zinc-400">
                 Open a project with{" "}
                 <kbd className="rounded-md border border-white/15 bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-zinc-200">
-                  Ctrl
-                </kbd>{" "}
-                +{" "}
-                <kbd className="rounded-md border border-white/15 bg-white/[0.06] px-1.5 py-0.5 text-xs font-medium text-zinc-200">
                   Alt
                 </kbd>{" "}
-                to open it in a background tab and auto-generate its proposal and
-                questions. A normal click (or Ctrl-click) just opens the project
-                without generating.
+                + click to open it in a background tab and auto-generate its
+                proposal and questions. Stay on the project list. Requires the
+                Helm Chrome extension. A normal click (or Ctrl-click) just opens
+                the project without generating.
               </p>
             </div>
 

@@ -55,8 +55,10 @@ export function PageHeader({
 
 export function DashboardShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen pl-56">
-      <main className="w-full px-6 py-8">{children}</main>
+    <div className="h-dvh overflow-hidden pl-56">
+      <main className="flex h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto px-6 py-6 [overflow-anchor:none]">
+        {children}
+      </main>
     </div>
   );
 }

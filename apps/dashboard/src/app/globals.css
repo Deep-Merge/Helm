@@ -28,10 +28,27 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+html.dashboard-lock-scroll,
+html.dashboard-lock-scroll body {
+  overflow: hidden !important;
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+html.dashboard-lock-scroll main {
+  overflow: hidden !important;
 }
 
 ::-webkit-scrollbar {
@@ -65,6 +82,108 @@ body {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+
+:root {
+  --find-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --find-fast: 140ms;
+  --find-med: 180ms;
+}
+
+@keyframes find-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes find-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.find-fade-up {
+  animation: find-fade-up var(--find-med) var(--find-ease) both;
+}
+
+.find-pop {
+  animation: find-pop var(--find-fast) var(--find-ease) both;
+}
+
+.find-sidebar-track {
+  display: grid;
+  min-height: 0;
+  transition:
+    grid-template-columns var(--find-med) var(--find-ease),
+    max-height var(--find-med) var(--find-ease),
+    opacity var(--find-fast) var(--find-ease),
+    gap var(--find-fast) var(--find-ease);
+}
+
+.find-sidebar-track[data-collapsed="true"] {
+  grid-template-columns: 0fr;
+  gap: 0;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.find-sidebar-track[data-collapsed="false"] {
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 1024px) {
+  .find-sidebar-track[data-collapsed="false"] {
+    grid-template-columns: minmax(0, 22rem);
+  }
+}
+
+.find-sidebar-track > .find-sidebar-pane {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.find-accordion {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--find-med) var(--find-ease);
+}
+
+.find-accordion[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+
+.find-accordion-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.find-list-pane {
+  transition: opacity var(--find-fast) var(--find-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .find-fade-up,
+  .find-pop {
+    animation: none;
+  }
+
+  .find-sidebar-track,
+  .find-accordion,
+  .find-list-pane {
+    transition: none;
+  }
 }
 
 @keyframes proposal-shimmer {

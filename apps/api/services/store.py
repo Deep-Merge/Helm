@@ -72,6 +72,40 @@ def delete_project(user_id: str, project_id: str, *, persistent: bool = False) -
     return _backend(persistent).delete_project(user_id, project_id)
 
 
+_PROTECTED_RANGE_STATUSES = {"submitted", "won", "lost"}
+
+
+def delete_projects_in_range(
+    user_id: str,
+    *,
+    date_from: str,
+    date_to: str | None = None,
+    tz_offset: int | None = None,
+    date_field: str = "seen",
+    status: str | None = None,
+    persistent: bool = False,
+) -> int:
+    """Delete projects in a local date range. Keeps submitted/won/lost unless status is submitted."""
+    filters: dict[str, Any] = {
+        "date_from": date_from,
+        "date_to": date_to or date_from,
+        "date_field": date_field,
+    }
+    if tz_offset is not None:
+        filters["tz_offset"] = tz_offset
+
+    pipeline = status if status and status not in ("all", "") else None
+    items, _ = list_projects(user_id, pipeline, None, 100000, 0, filters, persistent=persistent)
+    deleted = 0
+    protect_submitted = date_field != "submitted" and pipeline != "submitted"
+    for project in items:
+        if protect_submitted and project.get("status") in _PROTECTED_RANGE_STATUSES:
+            continue
+        if delete_project(user_id, project["id"], persistent=persistent):
+            deleted += 1
+    return deleted
+
+
 def cleanup_old_projects(user_id: str, older_than_days: int = 10, *, persistent: bool = False) -> int:
     return _backend(persistent).cleanup_old_projects(user_id, older_than_days)
 

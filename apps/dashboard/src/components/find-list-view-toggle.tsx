@@ -61,7 +61,7 @@ export function FindListViewToggle({
             key={mode.value}
             type="button"
             onClick={() => onChange(mode.value)}
-            className={`inline-flex items-center justify-center rounded-[0.65rem] p-2 transition ${
+            className={`inline-flex items-center justify-center rounded-[0.65rem] p-2 transition-colors duration-150 ease-out ${
               active
                 ? "bg-sky-500/20 text-sky-300 ring-1 ring-sky-500/35"
                 : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300"

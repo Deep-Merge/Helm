@@ -19,7 +19,13 @@ import {
   resolveFindSearchParams,
 } from "@/lib/find-last-preset";
 import { FIND_TABLE_PAGE_SIZE } from "@/lib/discover-client";
-import { consumeFindScrollRestore, restoreFindScroll } from "@/lib/find-scroll-restore";
+import { listenForBackgroundProjectOpen } from "@/lib/activate-find-project";
+import { LockViewportScroll } from "@/components/lock-viewport-scroll";
+import {
+  consumeFindScrollRestore,
+  registerFindListScroller,
+  restoreFindScroll,
+} from "@/lib/find-scroll-restore";
 import {
   readFindListView,
   writeFindListView,
@@ -82,7 +88,7 @@ export function FindPageSkeleton() {
 
 function FilterSidebarSkeleton() {
   return (
-    <div className="glass animate-pulse rounded-2xl px-4 py-2">
+    <div className="glass flex h-full min-h-0 animate-pulse flex-col overflow-hidden rounded-2xl px-4 py-2">
       <div className="border-b border-white/[0.08] py-3">
         <div className="h-5 w-16 rounded bg-white/[0.06]" />
       </div>
@@ -102,28 +108,6 @@ function FilterSidebarSkeleton() {
       ))}
     </div>
   );
-}
-
-function useElementHeight(ref: RefObject<HTMLElement | null>) {
-  const [height, setHeight] = useState(0);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const update = () => setHeight(el.getBoundingClientRect().height);
-    update();
-
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    window.addEventListener("resize", update);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, [ref]);
-
-  return height;
 }
 
 function FiltersSidebarToggle({
@@ -162,34 +146,51 @@ function FindPageLayout({
   pageHeader,
   filters,
   main,
-  stickyHeaderHeight = 0,
   filtersCollapsed = false,
   fullWidth = false,
+  listScrollerRef,
 }: {
   pageHeader: React.ReactNode;
   filters: React.ReactNode;
   main: React.ReactNode;
-  stickyHeaderHeight?: number;
   filtersCollapsed?: boolean;
   fullWidth?: boolean;
+  listScrollerRef?: RefObject<HTMLDivElement | null>;
 }) {
-  const sidebarStickyTop = stickyHeaderHeight > 0 ? stickyHeaderHeight + 12 : 24;
+  useLayoutEffect(() => {
+    const html = document.documentElement;
+    html.classList.add("dashboard-lock-scroll");
+    return () => {
+      html.classList.remove("dashboard-lock-scroll");
+    };
+  }, []);
 
   return (
-    <div className={fullWidth ? "w-full max-w-none -mx-6 px-6" : "mx-auto w-full max-w-7xl"}>
-      {pageHeader}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-        {!filtersCollapsed && (
-          <aside className="w-full shrink-0 lg:w-80 xl:w-[22rem]">
-            <div
-              className="lg:sticky lg:self-start"
-              style={{ top: sidebarStickyTop }}
-            >
+    <div
+      className={`flex min-h-0 flex-1 flex-col overflow-hidden ${
+        fullWidth ? "w-full max-w-none" : "mx-auto w-full max-w-7xl"
+      }`}
+    >
+      <div className="shrink-0">{pageHeader}</div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row lg:items-stretch">
+        <div
+          className="find-sidebar-track max-h-[42vh] lg:max-h-none lg:h-full"
+          data-collapsed={filtersCollapsed ? "true" : "false"}
+        >
+          <div className="find-sidebar-pane">
+            <aside className="flex h-full min-h-0 w-full flex-col lg:w-80 xl:w-[22rem]">
               {filters}
-            </div>
-          </aside>
-        )}
-        <section className="min-w-0 flex-1">{main}</section>
+            </aside>
+          </div>
+        </div>
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:pl-4">
+          <div
+            ref={listScrollerRef}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-6 pr-2"
+          >
+            {main}
+          </div>
+        </section>
       </div>
     </div>
   );
@@ -231,6 +232,8 @@ export function FindPageClient() {
     setLiveQ(filters.q);
   }, [filters.q]);
 
+  useEffect(() => listenForBackgroundProjectOpen(), []);
+
   const activeFilters = useMemo(
     () => ({ ...filters, q: liveQ }),
     [filters, liveQ],
@@ -248,8 +251,12 @@ export function FindPageClient() {
   const pendingScrollRestoreRef = useRef<number | null>(null);
   const prefsHydratedRef = useRef(false);
   const initialFetchDoneRef = useRef(false);
-  const stickyPageHeaderRef = useRef<HTMLDivElement>(null);
-  const stickyHeaderHeight = useElementHeight(stickyPageHeaderRef);
+  const listScrollerRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    registerFindListScroller(listScrollerRef.current);
+    return () => registerFindListScroller(null);
+  }, []);
 
   const returnTo = `/find?${toSearchParams(filters, false, page, status).toString()}`;
 
@@ -356,15 +363,14 @@ export function FindPageClient() {
   const isTableView = listView === "table";
 
   return (
+    <>
+    <LockViewportScroll />
     <FindPageLayout
-      stickyHeaderHeight={stickyHeaderHeight}
       filtersCollapsed={filtersCollapsed}
       fullWidth={isTableView}
+      listScrollerRef={listScrollerRef}
       pageHeader={
-        <div
-          ref={stickyPageHeaderRef}
-          className="sticky top-0 z-30 -mx-6 mb-4 border-b border-white/[0.08] bg-[#09090b]/95 px-6 pb-3 pt-2 backdrop-blur-md supports-[backdrop-filter]:bg-[#09090b]/85"
-        >
+        <div className="mb-3 border-b border-white/[0.08] bg-[#09090b] pb-3 pt-1">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <h1 className="text-3xl font-semibold tracking-tight">Find projects</h1>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -381,7 +387,7 @@ export function FindPageClient() {
           </div>
 
           {!isInitialLoad && (
-            <div className="mt-2">
+            <div className="find-fade-up mt-2">
               <FindStatusFilters
                 active={status}
                 buildHref={buildHref}
@@ -400,6 +406,7 @@ export function FindPageClient() {
                 sort={filters.sort}
                 onSortChange={handleSortChange}
                 onStatusChange={handleStatusChange}
+                onRangeDeleted={() => void refresh()}
               />
             </div>
           )}
@@ -428,17 +435,25 @@ export function FindPageClient() {
           )}
           {isInitialLoad ? (
             <ProjectListSkeleton />
-          ) : isTableView ? (
-            <ProjectFindTable projects={state.projects} returnTo={returnTo} />
           ) : (
-            <ProjectListCards
-              projects={state.projects}
-              returnTo={returnTo}
-              compact={listView === "short"}
-            />
+            <div
+              key={listView}
+              className={`find-fade-up find-list-pane ${loading ? "opacity-60" : "opacity-100"}`}
+            >
+              {isTableView ? (
+                <ProjectFindTable projects={state.projects} returnTo={returnTo} />
+              ) : (
+                <ProjectListCards
+                  projects={state.projects}
+                  returnTo={returnTo}
+                  compact={listView === "short"}
+                />
+              )}
+            </div>
           )}
         </>
       }
     />
+    </>
   );
 }

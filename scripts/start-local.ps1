@@ -36,7 +36,7 @@ if (Test-PortInUse 3001) {
     Write-Host "Port 3001 already in use. Dashboard looks already running." -ForegroundColor Yellow
 } else {
     Write-Host "Starting dashboard on http://localhost:3001 ..." -ForegroundColor Cyan
-    $dashProc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "npm run dev") -WorkingDirectory $dashboardDir -WindowStyle Hidden -PassThru
+    $dashProc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "npx.cmd next dev --port 3001 --webpack") -WorkingDirectory $dashboardDir -WindowStyle Hidden -PassThru
 }
 
 @{

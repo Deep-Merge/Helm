@@ -245,7 +245,7 @@ export function DateRangePicker({
 
       {open && (
         <div
-          className="absolute left-0 top-full z-50 mt-2 w-[680px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-white/10 bg-[#0f0f14] shadow-2xl shadow-black/60 ring-1 ring-indigo-500/20"
+          className="find-pop absolute left-0 top-full z-50 mt-2 w-[680px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-white/10 bg-[#0f0f14] shadow-2xl shadow-black/60 ring-1 ring-indigo-500/20"
         >
           <div className="border-b border-white/10 bg-gradient-to-r from-indigo-500/10 via-violet-500/5 to-transparent px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-3">

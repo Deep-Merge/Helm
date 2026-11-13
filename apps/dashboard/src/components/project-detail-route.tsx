@@ -5,6 +5,10 @@ import { ProjectDetailClient } from "@/components/project-detail-client";
 import { getCachedProject } from "@/lib/project-cache";
 import type { Bid, Project } from "@/lib/api";
 
+function hasSavedProposal(bids: Bid[]): boolean {
+  return bids.some((bid) => Boolean(bid.proposal_text?.trim()) || (bid.questions?.length ?? 0) > 0);
+}
+
 function DetailSkeleton() {
   return (
     <>
@@ -81,6 +85,40 @@ export function ProjectDetailRoute({
       cancelled = true;
     };
   }, [id]);
+
+  const hasProposal = hasSavedProposal(bids);
+
+  useEffect(() => {
+    if (hasProposal) return;
+
+    let cancelled = false;
+    const startedAt = Date.now();
+
+    const poll = async () => {
+      if (cancelled || Date.now() - startedAt > 60000) return;
+      try {
+        const res = await fetch(`/api/projects/${id}`, { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const detail = await res.json();
+        if (cancelled) return;
+        if (detail?.project) {
+          setProject(detail.project);
+          const nextBids = Array.isArray(detail.bids) ? detail.bids : [];
+          setBids(nextBids);
+          if (hasSavedProposal(nextBids)) return;
+        }
+      } catch {
+        /* keep polling */
+      }
+      if (!cancelled) window.setTimeout(() => void poll(), 2000);
+    };
+
+    const timer = window.setTimeout(() => void poll(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [id, hasProposal]);
 
   if (error && !project) {
     return <div className="text-sm text-zinc-500">{error}</div>;

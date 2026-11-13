@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { DateRangePicker } from "@/components/date-range-picker";
+import { DeleteRangeButton } from "@/components/delete-range-button";
 import { FilterSelect } from "@/components/filter-field";
 import { FindPagination } from "@/components/find-pagination";
 import { ProjectNameSearch } from "@/components/project-name-search";
@@ -81,6 +82,7 @@ export function FindStatusFilters({
   sort,
   onSortChange,
   onStatusChange,
+  onRangeDeleted,
 }: {
   active: FindStatusFilter;
   buildHref: (status: FindStatusFilter, page?: number) => string;
@@ -99,6 +101,7 @@ export function FindStatusFilters({
   sort: FindPriceSort;
   onSortChange: (sort: FindPriceSort) => void;
   onStatusChange: (status: FindStatusFilter) => void;
+  onRangeDeleted?: () => void;
 }) {
   return (
     <div className="flex w-full flex-wrap items-center gap-2">
@@ -117,6 +120,14 @@ export function FindStatusFilters({
           value={dateRange}
           onChange={onDateRangeChange}
           label="Posted date range"
+        />
+
+        <DeleteRangeButton
+          range={dateRange}
+          count={total}
+          dateField="seen"
+          status={active}
+          onDeleted={onRangeDeleted}
         />
 
         <FilterSelect

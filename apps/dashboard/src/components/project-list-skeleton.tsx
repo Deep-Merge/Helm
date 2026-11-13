@@ -54,7 +54,6 @@ export function DiscoverLoadingIndicator({
       aria-live="polite"
     >
       <span className="relative flex h-5 w-5 shrink-0">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400/30" />
         <span className="relative inline-flex h-5 w-5 animate-spin rounded-full border-2 border-indigo-400/30 border-t-indigo-400" />
       </span>
       <p className="text-base text-indigo-200/90">{message}</p>

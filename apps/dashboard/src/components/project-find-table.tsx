@@ -17,6 +17,7 @@ import { RelativeTime } from "@/components/relative-time";
 import type { Project } from "@/lib/api";
 import {
   activateFindProject,
+  applyFindProjectOpenHref,
   buildFindProjectDetailHref,
 } from "@/lib/activate-find-project";
 import { useProposalGeneration } from "@/hooks/use-proposal-generation";
@@ -92,7 +93,7 @@ const COLUMNS: ColumnDef[] = [
     render: (project, ctx) => (
       <div className="flex flex-col gap-1">
         <ProjectStatusBadge status={project.status} size="sm" />
-        {ctx.isGenerating ? <GeneratingProjectBadge compact /> : null}
+        {ctx.isGenerating && !ctx.isSubmitted ? <GeneratingProjectBadge compact /> : null}
       </div>
     ),
   },
@@ -102,7 +103,7 @@ const COLUMNS: ColumnDef[] = [
     thClassName: "min-w-[220px] px-3 py-2.5 font-medium",
     tdClassName: "max-w-[320px] px-3 py-2",
     render: (project, ctx) => (
-      <div
+      <span
         className={`truncate font-medium ${
           ctx.isGenerating
             ? "text-violet-100"
@@ -113,7 +114,7 @@ const COLUMNS: ColumnDef[] = [
         title={project.title}
       >
         {project.title}
-      </div>
+      </span>
     ),
   },
   {
@@ -200,7 +201,7 @@ const COLUMNS: ColumnDef[] = [
     key: "actions",
     label: "Actions",
     thClassName: "px-3 py-2.5 font-medium",
-    tdClassName: "px-3 py-2",
+    tdClassName: "relative z-10 px-3 py-2",
     stopPropagation: true,
     render: (project, ctx) => (
       <div className="flex items-center gap-1.5">
@@ -291,7 +292,7 @@ export function ProjectFindTable({
 
   if (projects.length === 0) {
     return (
-      <div className="glass flex flex-col items-center justify-center rounded-2xl py-16 text-center">
+      <div className="glass flex h-full min-h-[16rem] flex-col items-center justify-center rounded-2xl py-16 text-center">
         <p className="text-xl font-medium text-zinc-300">No projects yet</p>
         <p className="mt-2 max-w-sm text-base text-zinc-500">
           Try different filters or search Freelancer for more projects.
@@ -412,25 +413,33 @@ function FindProjectTableRow({
 
   return (
     <tr
-      role="button"
-      tabIndex={0}
-      onMouseEnter={prefetchDetail}
-      onFocus={prefetchDetail}
-      onClick={(event) => handleRowActivate(event)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          handleRowActivate(event);
-        }
-      }}
-      className={`cursor-pointer border-b border-white/[0.06] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500/40 ${rowHighlightClass(project.status, isGenerating)}`}
+      className={`relative cursor-pointer border-b border-white/[0.06] transition ${rowHighlightClass(project.status, isGenerating)}`}
     >
-      {columns.map((column) => (
+      {columns.map((column, index) => (
         <td
           key={column.key}
           className={column.tdClassName}
           onClick={column.stopPropagation ? (event) => event.stopPropagation() : undefined}
         >
+          {index === 0 ? (
+            <a
+              href={detailHref}
+              data-helm-background="generate"
+              aria-label={project.title}
+              className="absolute inset-0 z-[1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500/40"
+              onMouseEnter={prefetchDetail}
+              onFocus={prefetchDetail}
+              onMouseDown={(event) =>
+                applyFindProjectOpenHref(event.currentTarget, event, project, detailHref)
+              }
+              onClick={(event) => handleRowActivate(event)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  handleRowActivate(event);
+                }
+              }}
+            />
+          ) : null}
           {column.render(project, cellContext)}
         </td>
       ))}

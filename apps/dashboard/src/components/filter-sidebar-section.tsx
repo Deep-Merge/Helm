@@ -61,13 +61,17 @@ export function FilterSidebarSection({
           <button
             type="button"
             onClick={onClear}
-            className="shrink-0 text-xs font-medium text-indigo-400 hover:text-indigo-300"
+            className="shrink-0 text-xs font-medium text-indigo-400 transition-colors duration-150 hover:text-indigo-300"
           >
             Clear
           </button>
         )}
       </div>
-      {open && <div className="pb-1">{children}</div>}
+      <div className="find-accordion" data-open={open ? "true" : "false"}>
+        <div className="find-accordion-inner">
+          <div className="pb-1">{children}</div>
+        </div>
+      </div>
     </section>
   );
 }

@@ -16,6 +16,7 @@ import { RelativeTime } from "@/components/relative-time";
 import type { Project } from "@/lib/api";
 import {
   activateFindProject,
+  applyFindProjectOpenHref,
   buildFindProjectDetailHref,
 } from "@/lib/activate-find-project";
 import { useProposalGeneration } from "@/hooks/use-proposal-generation";
@@ -90,7 +91,7 @@ export function ProjectListCards({
 
   if (projects.length === 0) {
     return (
-      <div className="glass flex flex-col items-center justify-center rounded-2xl py-16 text-center">
+      <div className="glass flex h-full min-h-[16rem] flex-col items-center justify-center rounded-2xl py-16 text-center">
         <p className="text-xl font-medium text-zinc-300">No projects yet</p>
         <p className="mt-2 max-w-sm text-base text-zinc-500">
           Try different filters or search Freelancer for more projects.
@@ -161,18 +162,7 @@ function ProjectListCardItem({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onMouseEnter={prefetchDetail}
-      onFocus={prefetchDetail}
-      onClick={(event) => handleCardActivate(event)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          handleCardActivate(event);
-        }
-      }}
-      className={`group block cursor-pointer rounded-2xl outline-none transition-shadow duration-200 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b] ${
+      className={`group relative block cursor-pointer rounded-2xl outline-none transition-transform duration-150 ease-out will-change-transform hover:-translate-y-0.5 ${
               isGenerating
                 ? "ring-2 ring-violet-400/70 ring-offset-2 ring-offset-[#09090b] shadow-[0_0_32px_-8px_rgba(139,92,246,0.55)]"
                 : isNew
@@ -182,8 +172,25 @@ function ProjectListCardItem({
                     : "hover:ring-2 hover:ring-indigo-400/70 hover:ring-offset-2 hover:ring-offset-[#09090b] focus-visible:ring-indigo-500/50"
             }`}
           >
+            <a
+              href={detailHref}
+              data-helm-background="generate"
+              aria-label={project.title}
+              className="absolute inset-0 z-[1] rounded-2xl focus-visible:ring-2 focus-visible:ring-indigo-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b]"
+              onMouseEnter={prefetchDetail}
+              onFocus={prefetchDetail}
+              onMouseDown={(event) =>
+                applyFindProjectOpenHref(event.currentTarget, event, project, detailHref)
+              }
+              onClick={(event) => handleCardActivate(event)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  handleCardActivate(event);
+                }
+              }}
+            />
             <article
-              className={`relative overflow-hidden rounded-2xl transition-[border-color,box-shadow,background-color] duration-200 ${
+              className={`relative overflow-hidden rounded-2xl transition-[border-color,background-color] duration-150 ease-out ${
                 compact ? "px-4 py-3" : "px-6 py-5"
               } ${
                 isGenerating
@@ -223,7 +230,7 @@ function ProjectListCardItem({
                 <div className="min-w-0 flex-1">
                   <div className={`flex flex-wrap items-center gap-2 ${compact ? "mb-1" : "mb-2"}`}>
                     <ProjectStatusBadge status={project.status} size={compact ? "sm" : "md"} />
-                    {isGenerating ? <GeneratingProjectBadge compact={compact} /> : null}
+                    {isGenerating && !isSubmitted ? <GeneratingProjectBadge compact={compact} /> : null}
                     {compact && budgetText && (
                       <span className="truncate text-xs text-zinc-500">{budgetText}</span>
                     )}
@@ -325,7 +332,7 @@ function ProjectListCardItem({
                     size={compact ? "sm" : "md"}
                   />
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="relative z-[2] flex flex-wrap items-center gap-2">
                   <CopyProjectUrlButton project={project} />
                   <ToggleSubmittedButton project={project} onToggled={setProjectStatus} />
                   <DeleteProjectButton

@@ -15,5 +15,6 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+Enable-ScheduledTask -TaskName $taskName | Out-Null
 Write-Host "Registered startup task: $taskName" -ForegroundColor Green
 Write-Host "It will start API + dashboard when you sign in to Windows."

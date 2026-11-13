@@ -1,5 +1,15 @@
 const STORAGE_KEY = "bidautomation_find_scroll_restore";
 
+let findListScroller: HTMLElement | null = null;
+
+export function registerFindListScroller(node: HTMLElement | null) {
+  findListScroller = node;
+}
+
+function currentListScrollTop() {
+  return findListScroller?.scrollTop ?? (typeof window === "undefined" ? 0 : window.scrollY);
+}
+
 type ScrollRestorePayload = {
   returnTo: string;
   scrollY: number;
@@ -25,7 +35,7 @@ export function saveFindScrollRestore(returnTo: string) {
   try {
     const payload: ScrollRestorePayload = {
       returnTo: normalized,
-      scrollY: window.scrollY,
+      scrollY: currentListScrollTop(),
     };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {
@@ -53,6 +63,10 @@ export function consumeFindScrollRestore(currentReturnTo: string): number | null
 export function restoreFindScroll(scrollY: number) {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
+      if (findListScroller) {
+        findListScroller.scrollTop = scrollY;
+        return;
+      }
       window.scrollTo({ top: scrollY, left: 0, behavior: "auto" });
     });
   });

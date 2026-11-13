@@ -351,6 +351,28 @@ async def update_clarifications(
     return {"project": updated, "count": len(clarifications or [])}
 
 
+@router.post("/delete-range")
+async def delete_projects_in_range(
+    date_from: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    tz_offset: int | None = Query(None, ge=-720, le=840),
+    date_field: str = Query("seen", pattern="^(seen|submitted)$"),
+    status: str | None = Query(None),
+    auth: AuthContext = Depends(get_auth),
+):
+    """Delete all projects in the selected local date range."""
+    deleted = store.delete_projects_in_range(
+        auth.user_id,
+        date_from=date_from,
+        date_to=date_to,
+        tz_offset=tz_offset,
+        date_field=date_field,
+        status=status,
+        persistent=auth.persistent,
+    )
+    return {"deleted": deleted}
+
+
 @router.post("/cleanup")
 async def cleanup_old_projects(
     days: int = Query(10, ge=1, le=365),

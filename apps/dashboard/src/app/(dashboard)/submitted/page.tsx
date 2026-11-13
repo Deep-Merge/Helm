@@ -1,3 +1,4 @@
+import { LockViewportScroll } from "@/components/lock-viewport-scroll";
 import { PageHeader } from "@/components/layout";
 import { SubmittedFilters } from "@/components/submitted-filters";
 import { SubmittedPagination } from "@/components/submitted-pagination";
@@ -59,32 +60,41 @@ export default async function SubmittedPage({
   const totalPages = Math.max(1, Math.ceil(total / SUBMITTED_PAGE_SIZE));
 
   return (
-    <>
-      <PageHeader title="Submitted" description="Projects you have placed bids on." />
-      {error && (
-        <p className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          API error: {error}. Is the backend running on port 8000?
-        </p>
-      )}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <SubmittedFilters initial={filters} />
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <LockViewportScroll />
+      <div className="shrink-0">
+        <PageHeader
+          title="Submitted"
+          description="Projects you have placed bids on."
+          className="!mb-4"
+        />
+        {error && (
+          <p className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            API error: {error}. Is the backend running on port 8000?
+          </p>
+        )}
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <SubmittedFilters initial={filters} />
+          </div>
+          <SubmittedPagination
+            className="ml-auto shrink-0"
+            page={page}
+            totalPages={totalPages}
+            total={total}
+            pageSize={SUBMITTED_PAGE_SIZE}
+            baseQuery={baseQuery}
+          />
         </div>
-        <SubmittedPagination
-          className="ml-auto shrink-0"
-          page={page}
-          totalPages={totalPages}
-          total={total}
-          pageSize={SUBMITTED_PAGE_SIZE}
-          baseQuery={baseQuery}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-6 pr-2">
+        <SubmittedProjectCards
+          projects={projects}
+          returnTo={returnTo}
+          searchQuery={filters.q.trim()}
+          dayCounts={dayCounts}
         />
       </div>
-      <SubmittedProjectCards
-        projects={projects}
-        returnTo={returnTo}
-        searchQuery={filters.q.trim()}
-        dayCounts={dayCounts}
-      />
-    </>
+    </div>
   );
 }

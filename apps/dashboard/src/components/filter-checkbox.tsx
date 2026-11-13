@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 
 function CheckIcon() {
   return (
@@ -45,24 +45,23 @@ export function FilterCheckboxRow({
   trailing?: ReactNode;
 }) {
   return (
-    <label
-      className={`group flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-sm transition-colors duration-150 ${
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      onClick={onToggle}
+      onMouseDown={(event) => event.preventDefault()}
+      className={`group flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm transition-colors duration-150 ${
         checked
           ? "bg-indigo-500/[0.08] text-zinc-100"
           : "text-zinc-400 hover:bg-white/[0.03] hover:text-zinc-300"
       }`}
     >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onToggle}
-        className="sr-only"
-      />
       <FilterCheckboxBox checked={checked} />
       {leading}
       <span className="min-w-0 flex-1 leading-snug">{children}</span>
       {trailing}
-    </label>
+    </button>
   );
 }
 
@@ -134,8 +133,22 @@ export function FilterScrollList({
   children: ReactNode;
   maxHeightClass?: string;
 }) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const scrollTopRef = useRef(0);
+
+  useLayoutEffect(() => {
+    const node = scrollerRef.current;
+    if (node) node.scrollTop = scrollTopRef.current;
+  });
+
   return (
-    <div className={`${maxHeightClass} overflow-y-auto overscroll-contain`}>
+    <div
+      ref={scrollerRef}
+      className={`${maxHeightClass} overflow-y-auto overscroll-contain [overflow-anchor:none]`}
+      onScroll={(event) => {
+        scrollTopRef.current = event.currentTarget.scrollTop;
+      }}
+    >
       <ul className="space-y-0.5">{children}</ul>
     </div>
   );

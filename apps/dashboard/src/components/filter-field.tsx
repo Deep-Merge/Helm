@@ -25,7 +25,7 @@ export const POSTED_WITHIN_OPTIONS = [
 ] as const;
 
 export const fieldBase =
-  "h-9 w-full rounded-lg border border-white/10 bg-white/[0.03] text-[13px] text-zinc-200 outline-none transition placeholder:text-zinc-500 hover:border-white/15 focus:border-indigo-500/50 focus:bg-white/[0.05] focus:ring-2 focus:ring-indigo-500/20";
+  "h-9 w-full rounded-lg border border-white/10 bg-white/[0.03] text-[13px] text-zinc-200 outline-none transition-colors duration-150 ease-out placeholder:text-zinc-500 hover:border-white/15 focus:border-indigo-500/50 focus:bg-white/[0.05] focus:ring-2 focus:ring-indigo-500/20";
 
 type Option = { value: string; label: string };
 
@@ -175,7 +175,7 @@ export function FilterSelect({
           role="listbox"
           tabIndex={-1}
           onKeyDown={onListKeyDown}
-          className={`absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden ${listClass}`}
+          className={`find-pop absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden ${listClass}`}
         >
           {options.map((option, index) => {
             const isSelected = option.value === current;

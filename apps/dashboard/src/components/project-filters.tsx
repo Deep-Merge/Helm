@@ -25,6 +25,10 @@ import {
 
 export type { ProjectFilterValues, SavedFilter };
 
+type SkillOption = { skill: string; count: number };
+
+let cachedSkillOptions: SkillOption[] | null = null;
+
 function ProjectTypeCheckbox({
   label,
   checked,
@@ -72,8 +76,8 @@ export function ProjectFilters({
   const [presetName, setPresetName] = useState("");
   const [saving, setSaving] = useState(false);
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
-  const [skillOptions, setSkillOptions] = useState<{ skill: string; count: number }[]>([]);
-  const [skillsLoading, setSkillsLoading] = useState(true);
+  const [skillOptions, setSkillOptions] = useState<SkillOption[]>(cachedSkillOptions ?? []);
+  const [skillsLoading, setSkillsLoading] = useState(cachedSkillOptions == null);
 
   useEffect(() => {
     setAppliedValues(initial);
@@ -93,17 +97,17 @@ export function ProjectFilters({
   useEffect(() => {
     let cancelled = false;
 
-    async function loadSkills() {
-      setSkillsLoading(true);
+    async function loadSkills(silent = false) {
+      if (!silent && cachedSkillOptions == null) setSkillsLoading(true);
       try {
         const res = await fetch("/api/projects/skills", { cache: "no-store" });
         if (!res.ok) throw new Error(`API ${res.status}`);
-        const data = (await res.json()) as { skills?: { skill: string; count: number }[] };
-        if (!cancelled) {
-          setSkillOptions(data.skills || []);
-        }
+        const data = (await res.json()) as { skills?: SkillOption[] };
+        const next = data.skills || [];
+        cachedSkillOptions = next;
+        if (!cancelled) setSkillOptions(next);
       } catch {
-        if (!cancelled) setSkillOptions([]);
+        if (!cancelled && cachedSkillOptions == null) setSkillOptions([]);
       } finally {
         if (!cancelled) setSkillsLoading(false);
       }
@@ -112,7 +116,7 @@ export function ProjectFilters({
     void loadSkills();
 
     function onProjectsUpdated() {
-      void loadSkills();
+      void loadSkills(true);
     }
 
     window.addEventListener("bidautomation:projects-updated", onProjectsUpdated);
@@ -295,8 +299,8 @@ function ProjectFiltersSidebar({
   const submitValues = buildSubmitValues();
 
   return (
-    <div className="glass rounded-2xl px-4 py-2">
-      <div className="flex items-center justify-between gap-2 border-b border-white/[0.08] py-3">
+    <div className="glass flex h-full min-h-0 flex-col overflow-hidden rounded-2xl">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.08] px-4 py-3">
         <h2 className="text-base font-semibold text-zinc-100">Filters</h2>
         {collapseToggle ??
           (onCollapse ? (
@@ -315,6 +319,7 @@ function ProjectFiltersSidebar({
           ) : null)}
       </div>
 
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-5 [overflow-anchor:none]">
       <FilterSidebarSection
         title="Presets"
         sectionId="presets"
@@ -479,6 +484,7 @@ function ProjectFiltersSidebar({
             </button>
           </div>
         </div>
+      </div>
       </div>
   );
 }

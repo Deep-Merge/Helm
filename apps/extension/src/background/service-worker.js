@@ -162,7 +162,26 @@ async function broadcastNewProjectsToDashboard(count) {
         /* tabs query failed */
     }
 }
-function handleExternalMessage(message, sendResponse) {
+async function openBackgroundTab(url, stayOnTabId) {
+    const target = url?.trim();
+    if (!target)
+        return { ok: false, error: "Missing URL" };
+    try {
+        const parsed = new URL(target);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+            return { ok: false, error: "Unsupported URL" };
+        }
+        await chrome.tabs.create({ url: parsed.href, active: false });
+        if (stayOnTabId != null) {
+            await chrome.tabs.update(stayOnTabId, { active: true }).catch(() => undefined);
+        }
+        return { ok: true };
+    }
+    catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+}
+function handleExternalMessage(message, sender, sendResponse) {
     if (message?.type === "AUTH_TOKEN") {
         saveAuthToken(message);
         sendResponse({ ok: true });
@@ -170,6 +189,10 @@ function handleExternalMessage(message, sendResponse) {
     }
     if (message?.type === "OPEN_PROJECT") {
         void saveDashboardHandoff(message).then((ok) => sendResponse({ ok }));
+        return true;
+    }
+    if (message?.type === "OPEN_BACKGROUND_TAB") {
+        void openBackgroundTab(message.url, sender.tab?.id).then(sendResponse);
         return true;
     }
     if (message?.type === "REFRESH_CLARIFICATIONS") {
@@ -178,8 +201,8 @@ function handleExternalMessage(message, sendResponse) {
     }
     return true;
 }
-chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) => handleExternalMessage(message, sendResponse));
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => handleExternalMessage(message, sender, sendResponse));
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "AUTH_TOKEN") {
         saveAuthToken(message);
         sendResponse({ ok: true });
@@ -187,6 +210,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     if (message?.type === "OPEN_PROJECT") {
         void saveDashboardHandoff(message).then((ok) => sendResponse({ ok }));
+        return true;
+    }
+    if (message?.type === "OPEN_BACKGROUND_TAB") {
+        void openBackgroundTab(message.url, sender.tab?.id).then(sendResponse);
         return true;
     }
     if (message?.type === "REFRESH_CLARIFICATIONS") {

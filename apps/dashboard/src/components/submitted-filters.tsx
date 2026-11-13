@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { DateRangePicker } from "@/components/date-range-picker";
+import { DeleteRangeButton } from "@/components/delete-range-button";
 import { BUDGET_TYPE_OPTIONS, FilterNumberInput, FilterSelect } from "@/components/filter-field";
 import { ProjectNameSearch } from "@/components/project-name-search";
 import { getBrowserTimezoneOffset, getLast7DaysRange, type DateRange } from "@/lib/date-range";
@@ -107,6 +108,13 @@ export function SubmittedFilters({ initial }: { initial: SubmittedFilterValues }
           value={submittedDateRange(values)}
           onChange={onDateRangeChange}
           label="Bid date range"
+        />
+
+        <DeleteRangeButton
+          range={submittedDateRange(values)}
+          dateField="submitted"
+          status="submitted"
+          onDeleted={() => router.refresh()}
         />
 
         <ProjectNameSearch value={values.q} onChange={onSearchChange} />
